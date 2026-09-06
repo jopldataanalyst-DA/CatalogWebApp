@@ -60,23 +60,27 @@ issues on this VPS's Dokploy version).
    (`jopldataanalyst-DA/CatalogWebApp`), branch `main`.
 2. Build type: **Nixpacks** (auto-detected from `nixpacks.toml`).
 3. Port: container `8010` → whatever host port you want to expose.
-4. Environment variables (same DB PricingManagementSystem uses - see that
-   app's own Dokploy config for the current values):
+4. Environment variables:
    ```
-   DB_HOST=172.16.1.1
-   DB_PORT=5433
+   DB_HOST=supabase-db
+   DB_PORT=5432
    DB_USER=postgres
    DB_PASSWORD=<same as PricingManagementSystem's DB_PASSWORD>
    DB_NAME=postgres
    USE_SSH_TUNNEL=false
    ```
    (`USE_SSH_TUNNEL=false`/unset is correct here - Dokploy containers sit on
-   the VPS's own network already, no tunnel needed. This host/port pair is
-   inherited from PricingManagementSystem's known-working Dokploy config;
-   it has not yet been separately confirmed reachable from a *second*,
-   independent Dokploy app - if it doesn't connect, check whether Postgres's
-   host-gateway exposure on port 5433 is scoped to a specific container/
-   network.)
+   the VPS's own network already, no tunnel needed. **`DB_HOST=supabase-db`
+   is correct, not `172.16.1.1` (PricingManagementSystem's own host-gateway
+   address, only reachable on its network - CatalogWebApp's Dokploy app
+   lands on `dokploy-network`, the same Docker network `supabase-db` is
+   also directly attached to, so its container DNS name resolves and its
+   real Postgres port 5432 is reachable directly - confirmed live via
+   `docker exec ... python -c "socket.create_connection(('supabase-db',
+   5432))"`.** If a future Dokploy app ever lands on some OTHER network
+   that isn't `dokploy-network`, check `docker inspect supabase-db` for
+   which networks it's actually attached to before assuming either address
+   works.)
 5. Point a domain/subdomain at it (e.g. `catalog.rajnandinifashion.com`) in
    Dokploy's Domains tab.
 6. Deploy. `GET /api/categories` should return `200` once it's up.
