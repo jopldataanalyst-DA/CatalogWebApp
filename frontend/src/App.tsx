@@ -61,6 +61,12 @@ export default function App() {
     [items, page, pageSize],
   )
 
+  // Changing page swaps the grid's whole contents out from under the
+  // viewer, who's typically scrolled down near the pagination bar at the
+  // bottom when they click it - jump back to the top so they land on the
+  // new page's first row instead of staring at its tail end.
+  useEffect(() => { window.scrollTo({ top: 0, behavior: 'auto' }) }, [page])
+
   const emptyState = useMemo(() => !loading && items.length === 0, [loading, items])
   const activeFilterCount =
     filters.categories.length +
