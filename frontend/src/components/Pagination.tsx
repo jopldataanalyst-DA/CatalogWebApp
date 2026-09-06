@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react'
 
 const PAGE_SIZE_OPTIONS = [8, 12, 16, 20]
 
@@ -10,6 +10,48 @@ interface Props {
   total: number
   onPageChange: (page: number) => void
   onPageSizeChange: (size: number) => void
+}
+
+function PageSizeMenu({ pageSize, onChange }: { pageSize: number; onChange: (size: number) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex items-center gap-1.5 text-xs font-medium bg-white border border-[var(--color-line)] rounded-full px-3.5 py-2 outline-none cursor-pointer hover:border-[var(--color-gold)] transition-colors"
+      >
+        {pageSize} per page
+        <ChevronDown size={13} className={`text-[var(--color-ink)]/40 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+      {open && (
+        <div className="absolute bottom-full right-0 mb-1.5 w-32 rounded-xl border border-[var(--color-line)] bg-white shadow-lg p-1 z-20">
+          {PAGE_SIZE_OPTIONS.map(n => (
+            <button
+              key={n}
+              onClick={() => { onChange(n); setOpen(false) }}
+              className={`w-full text-left text-xs px-3 py-2 rounded-lg transition-colors ${
+                n === pageSize
+                  ? 'bg-[var(--color-gold)] text-white font-semibold'
+                  : 'text-[var(--color-ink)]/70 hover:bg-[var(--color-paper2)]'
+              }`}
+            >
+              {n} per page
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 export function Pagination({ page, totalPages, pageSize, total, onPageChange, onPageSizeChange }: Props) {
@@ -32,7 +74,7 @@ export function Pagination({ page, totalPages, pageSize, total, onPageChange, on
         <button
           onClick={() => onPageChange(page - 1)}
           disabled={page <= 1}
-          className="w-8 h-8 flex items-center justify-center rounded-full border border-[var(--color-line)] disabled:opacity-30 hover:border-[var(--color-ink)]/40"
+          className="w-8 h-8 flex items-center justify-center rounded-full border border-[var(--color-line)] disabled:opacity-30 hover:border-[var(--color-gold)] transition-colors"
         >
           <ChevronLeft size={15} />
         </button>
@@ -53,21 +95,13 @@ export function Pagination({ page, totalPages, pageSize, total, onPageChange, on
         <button
           onClick={() => onPageChange(page + 1)}
           disabled={page >= totalPages}
-          className="w-8 h-8 flex items-center justify-center rounded-full border border-[var(--color-line)] disabled:opacity-30 hover:border-[var(--color-ink)]/40"
+          className="w-8 h-8 flex items-center justify-center rounded-full border border-[var(--color-line)] disabled:opacity-30 hover:border-[var(--color-gold)] transition-colors"
         >
           <ChevronRight size={15} />
         </button>
       </div>
 
-      <select
-        value={pageSize}
-        onChange={e => onPageSizeChange(Number(e.target.value))}
-        className="text-xs font-medium bg-white border border-[var(--color-line)] rounded-full px-3 py-2 outline-none cursor-pointer"
-      >
-        {PAGE_SIZE_OPTIONS.map(n => (
-          <option key={n} value={n}>{n} per page</option>
-        ))}
-      </select>
+      <PageSizeMenu pageSize={pageSize} onChange={onPageSizeChange} />
 
       <span className="text-xs text-[var(--color-ink)]/40">{total.toLocaleString()} styles</span>
     </div>
