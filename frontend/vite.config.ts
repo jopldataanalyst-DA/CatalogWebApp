@@ -12,4 +12,11 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    // The backend serves this directly in production (see main.py) - same
+    // single-container pattern PricingManagementSystem uses, just Docker
+    // instead of Nixpacks since this is a fresh, simpler app.
+    outDir: '../backend/static',
+    emptyOutDir: true,
+  },
 })

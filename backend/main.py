@@ -12,11 +12,13 @@ Use case:
 
 import re
 import urllib.request
+from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from db import fetch_all, fetch_one
@@ -211,3 +213,35 @@ async def image_proxy(id: str = Query(..., description="Google Drive file id"), 
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
     return Response(content=data, media_type=content_type, headers={"Cache-Control": "public, max-age=86400"})
+
+
+# ---------------------------------------------------------------------------
+# Serve the built frontend (production only - `frontend/` builds into
+# `backend/static/` per vite.config.ts). In local dev this directory doesn't
+# exist, so these blocks are no-ops and the Vite dev server (with its own
+# /api proxy to this backend) serves the UI instead. Same single-container
+# pattern PricingManagementSystem's Main.py uses for its own SPA.
+# ---------------------------------------------------------------------------
+
+_static_dir = Path(__file__).parent / "static"
+_spa_index = _static_dir / "index.html"
+
+if (_static_dir / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(_static_dir / "assets")), name="assets")
+
+
+@app.get("/{full_path:path}", include_in_schema=False)
+async def spa_catchall(request: Request, full_path: str):
+    if full_path.startswith("api/"):
+        return HTMLResponse(content='{"detail":"Not Found"}', status_code=404, media_type="application/json")
+    # Public root files copied verbatim from frontend/public/ (favicon.svg
+    # etc.) - not under /assets, so they need this direct check before
+    # falling through to the SPA shell.
+    candidate = _static_dir / full_path
+    if full_path and candidate.is_file() and _static_dir in candidate.resolve().parents:
+        return FileResponse(str(candidate))
+    if _spa_index.exists():
+        response = FileResponse(str(_spa_index), media_type="text/html")
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        return response
+    return HTMLResponse(content="<h1>Frontend build not found. Run: npm run build</h1>", status_code=503)
