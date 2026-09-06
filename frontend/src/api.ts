@@ -7,7 +7,11 @@ async function get<T>(url: string): Promise<T> {
   return res.json()
 }
 
-export function fetchCatalog(search: string, filters: CatalogFilters): Promise<{ items: CatalogItem[] }> {
+export function fetchCatalog(
+  search: string,
+  filters: CatalogFilters,
+  collection?: string,
+): Promise<{ items: CatalogItem[]; collection_title: string | null }> {
   const params = new URLSearchParams()
   if (search) params.set('search', search)
   filters.categories.forEach(c => params.append('categories', c))
@@ -16,6 +20,7 @@ export function fetchCatalog(search: string, filters: CatalogFilters): Promise<{
   if (filters.priceMin != null) params.set('price_min', String(filters.priceMin))
   if (filters.priceMax != null) params.set('price_max', String(filters.priceMax))
   if (filters.includeOutOfStock) params.set('include_out_of_stock', 'true')
+  if (collection) params.set('collection', collection)
   return get(`/api/catalog?${params.toString()}`)
 }
 

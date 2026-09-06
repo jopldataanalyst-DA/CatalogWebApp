@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Search, PackageSearch, SlidersHorizontal } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import { Search, PackageSearch, SlidersHorizontal, X } from 'lucide-react'
 import { fetchCatalog, fetchCategories, fetchFabrics, fetchSizes } from '../api'
 import { FilterSidebar } from '../components/FilterSidebar'
 import { Pagination } from '../components/Pagination'
@@ -20,6 +21,9 @@ function useDebounced<T>(value: T, delay: number): T {
 }
 
 export function SearchPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const collection = searchParams.get('collection') ?? ''
+  const [collectionTitle, setCollectionTitle] = useState<string | null>(null)
   const [items, setItems] = useState<CatalogItem[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [fabrics, setFabrics] = useState<string[]>([])
@@ -45,15 +49,15 @@ export function SearchPage() {
     // so a fresh load always reflects the latest edit - no cache to bust.
     let cancelled = false
     setLoading(true)
-    fetchCatalog(debouncedSearch, filters)
-      .then(d => { if (!cancelled) setItems(d.items) })
+    fetchCatalog(debouncedSearch, filters, collection)
+      .then(d => { if (!cancelled) { setItems(d.items); setCollectionTitle(d.collection_title) } })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [debouncedSearch, filters])
+  }, [debouncedSearch, filters, collection])
 
   // A new search/filter changes what "page 1" even means, so always snap
   // back there rather than leaving the viewer stranded on a now out-of-range page.
-  useEffect(() => { setPage(1) }, [debouncedSearch, filters, pageSize])
+  useEffect(() => { setPage(1) }, [debouncedSearch, filters, collection, pageSize])
 
   const totalPages = Math.max(1, Math.ceil(items.length / pageSize))
   const pagedItems = useMemo(
@@ -80,7 +84,20 @@ export function SearchPage() {
     <>
       <div className="border-b border-[var(--color-line)] bg-[var(--color-paper)]">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-          <h2 className="text-sm font-semibold text-[var(--color-ink)]/70 hidden sm:block">Browse All Products</h2>
+          {collection && collectionTitle ? (
+            <div className="flex items-center gap-2 bg-[var(--color-gold)]/10 border border-[var(--color-gold)]/30 rounded-full pl-3.5 pr-1.5 py-1">
+              <span className="text-sm font-medium text-[var(--color-gold-dark)]">Showing: {collectionTitle}</span>
+              <button
+                onClick={() => setSearchParams(prev => { const p = new URLSearchParams(prev); p.delete('collection'); return p })}
+                className="text-[var(--color-gold-dark)] hover:bg-[var(--color-gold)]/20 rounded-full p-1"
+                aria-label="Clear collection filter"
+              >
+                <X size={13} />
+              </button>
+            </div>
+          ) : (
+            <h2 className="text-sm font-semibold text-[var(--color-ink)]/70 hidden sm:block">Browse All Products</h2>
+          )}
           <div className="flex items-center gap-2 ml-auto">
             <button
               onClick={() => setMobileFiltersOpen(true)}
@@ -142,7 +159,7 @@ export function SearchPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 sm:gap-5">
               {Array.from({ length: pageSize }).map((_, i) => (
                 <div key={i} className="animate-pulse rounded-2xl overflow-hidden border border-[var(--color-line)]">
-                  <div className="aspect-[3/4] bg-[var(--color-paper2)]" />
+                  <div className="aspect-[3/5] bg-[var(--color-paper2)]" />
                   <div className="p-4 space-y-2">
                     <div className="h-3 w-2/3 bg-[var(--color-paper2)] rounded" />
                     <div className="h-3 w-1/3 bg-[var(--color-paper2)] rounded" />

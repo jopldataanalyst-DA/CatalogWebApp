@@ -1,13 +1,17 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { X, ChevronLeft, ChevronRight, ImageOff, Loader2 } from 'lucide-react'
 import { fetchStyle, imageUrl } from '../api'
 import type { StyleDetail as StyleDetailType } from '../types'
+
+const SWIPE_THRESHOLD_PX = 50
 
 export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClose: () => void }) {
   const [data, setData] = useState<StyleDetailType | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeIdx, setActiveIdx] = useState(0)
   const [imageLoaded, setImageLoaded] = useState(false)
+  const dragStartX = useRef<number | null>(null)
+  const [dragDeltaX, setDragDeltaX] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -24,13 +28,38 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
   useEffect(() => { setImageLoaded(false) }, [activeIdx, data])
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+      if (e.key === 'ArrowLeft') setActiveIdx(i => (images.length ? (i - 1 + images.length) % images.length : i))
+      if (e.key === 'ArrowRight') setActiveIdx(i => (images.length ? (i + 1) % images.length : i))
+    }
     document.addEventListener('keydown', onKey)
     document.body.style.overflow = 'hidden'
     return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = '' }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose])
 
   const images = data?.images ?? []
+
+  const goPrev = () => setActiveIdx(i => (i - 1 + images.length) % images.length)
+  const goNext = () => setActiveIdx(i => (i + 1) % images.length)
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (images.length < 2) return
+    dragStartX.current = e.clientX
+    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+  }
+  const onPointerMove = (e: React.PointerEvent) => {
+    if (dragStartX.current == null) return
+    setDragDeltaX(e.clientX - dragStartX.current)
+  }
+  const endDrag = () => {
+    if (dragStartX.current == null) return
+    if (dragDeltaX > SWIPE_THRESHOLD_PX) goPrev()
+    else if (dragDeltaX < -SWIPE_THRESHOLD_PX) goNext()
+    dragStartX.current = null
+    setDragDeltaX(0)
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" onClick={onClose}>
@@ -38,7 +67,14 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
         className="bg-[var(--color-paper)] w-full max-w-4xl max-h-[92vh] rounded-2xl overflow-hidden shadow-2xl grid grid-cols-1 md:grid-cols-2"
         onClick={e => e.stopPropagation()}
       >
-        <div className="relative bg-white aspect-square md:aspect-auto md:h-full flex items-center justify-center border-r border-[var(--color-line)]">
+        <div
+          className="relative bg-white aspect-square md:aspect-auto md:h-full flex items-center justify-center border-r border-[var(--color-line)] touch-pan-y select-none"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endDrag}
+          onPointerCancel={endDrag}
+          style={{ cursor: images.length > 1 ? 'grab' : 'default' }}
+        >
           {loading ? (
             <Loader2 size={28} className="text-[var(--color-ink)]/25 animate-spin" />
           ) : images.length > 0 ? (
@@ -51,19 +87,20 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
                 src={imageUrl(images[activeIdx].drive_file_id, 'w1200')}
                 alt={data?.style_id}
                 onLoad={() => setImageLoaded(true)}
-                className={`w-full h-full object-contain transition-opacity duration-200 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
+                draggable={false}
+                className={`w-full h-full object-contain transition-opacity duration-200 pointer-events-none ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
               />
               {images.length > 1 && (
                 <>
                   <button
-                    onClick={() => setActiveIdx(i => (i - 1 + images.length) % images.length)}
+                    onClick={goPrev}
                     className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/5 hover:bg-black/10 text-[var(--color-ink)] rounded-full p-1.5"
                     aria-label="Previous image"
                   >
                     <ChevronLeft size={18} />
                   </button>
                   <button
-                    onClick={() => setActiveIdx(i => (i + 1) % images.length)}
+                    onClick={goNext}
                     className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/5 hover:bg-black/10 text-[var(--color-ink)] rounded-full p-1.5"
                     aria-label="Next image"
                   >
@@ -108,9 +145,16 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
           ) : (
             <div className="space-y-6 pt-2">
               <div>
-                <span className="text-[11px] tracking-widest uppercase text-[var(--color-gold-dark)] font-medium">
-                  {data.category}
-                </span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[11px] tracking-widest uppercase text-[var(--color-gold-dark)] font-medium">
+                    {data.category}
+                  </span>
+                  {data.tier && (
+                    <span className="text-[10px] font-semibold tracking-wide uppercase px-2 py-0.5 rounded-full bg-[var(--color-gold)] text-white">
+                      {data.tier}
+                    </span>
+                  )}
+                </div>
                 <h2 className="font-[var(--font-display)] text-2xl sm:text-3xl mt-1" style={{ fontFamily: 'var(--font-display)' }}>
                   {data.style_id}
                 </h2>

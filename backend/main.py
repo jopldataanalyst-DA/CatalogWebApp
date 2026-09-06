@@ -80,6 +80,31 @@ _STYLE_TIER_CTE = """
 """
 
 _TIER_RANK = {"Diamond A": 0, "Diamond B": 1, "Diamond C": 2, "Platinum A": 3, "Platinum B": 4, "Platinum C": 5}
+_BEST_SELLER_TIERS = ("Diamond A", "Diamond B", "Diamond C")
+_TRENDING_TIERS = ("Platinum A", "Platinum B", "Platinum C")
+# "New Arrivals" = the N most-recently-added active styles, NOT a fixed time
+# window - a day/week cutoff is meaningless right after a bulk import (every
+# style would tie on "added today"), and stays meaningful indefinitely once
+# styles trickle in one at a time (the window just naturally slides).
+_NEW_ARRIVALS_LIMIT = 60
+
+# Public, shopper-facing collections - never expose PricingManagementSystem's
+# internal tier jargon ("Diamond"/"Platinum") to the storefront. "Browse all"
+# on a homepage section links to /search?collection=<key>, which this same
+# key filters down to - so the deep link always matches what was shown.
+_COLLECTIONS = {
+    "best_sellers": {"title": "Best Sellers", "subtitle": "Our top-performing styles by sales volume", "badge": "Best Seller"},
+    "trending_now": {"title": "Trending Now", "subtitle": "Consistently strong sellers", "badge": "Trending"},
+    "new_arrivals": {"title": "New Arrivals", "subtitle": "Freshly added to the catalog", "badge": "New"},
+}
+
+
+def _badge_for_tier(tier: Optional[str]) -> Optional[str]:
+    if tier in _BEST_SELLER_TIERS:
+        return "Best Seller"
+    if tier in _TRENDING_TIERS:
+        return "Trending"
+    return None
 
 
 @app.get("/api/catalog")
@@ -91,6 +116,7 @@ async def list_catalog(
     price_min: Optional[float] = Query(None),
     price_max: Optional[float] = Query(None),
     include_out_of_stock: bool = Query(False, description="Show styles with zero sizes currently in stock too"),
+    collection: str = Query("", description="One of best_sellers/trending_now/new_arrivals - matches a homepage section's 'Browse all' link"),
 ):
     """Every active B2B Catalog style with at least one image, cover
     thumbnail, fabric, category, price, and the sizes currently in stock."""
@@ -111,6 +137,16 @@ async def list_catalog(
     if price_max is not None:
         where.append("cat.price <= %s")
         params.append(price_max)
+    if collection == "best_sellers":
+        where.append("cat.tier = ANY(%s)")
+        params.append(list(_BEST_SELLER_TIERS))
+    elif collection == "trending_now":
+        where.append("cat.tier = ANY(%s)")
+        params.append(list(_TRENDING_TIERS))
+    elif collection == "new_arrivals":
+        where.append(
+            f"cat.style_id IN (SELECT style_id FROM b2b_catalog WHERE is_active = TRUE ORDER BY added_at DESC LIMIT {_NEW_ARRIVALS_LIMIT})"
+        )
     where_sql = "WHERE " + " AND ".join(where)
 
     having = ["(SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) > 0"]
@@ -129,15 +165,17 @@ async def list_catalog(
     rows = fetch_all(
         f"""
         WITH {_ITEM_MASTER_CATEGORY_CTE},
+        {_STYLE_TIER_CTE},
         cat_all AS (
-            SELECT b.*, imc.category
+            SELECT b.*, imc.category, st.tier
             FROM b2b_catalog b
             LEFT JOIN im_category imc ON imc.style_id = b.style_id
+            LEFT JOIN style_tier st ON st.style_id = b.style_id
         ),
         cat AS (SELECT * FROM cat_all AS cat {where_sql}),
         {_SKU_STOCK_CTE}
         SELECT
-            cat.style_id, cat.fabric, cat.category, cat.price,
+            cat.style_id, cat.fabric, cat.category, cat.price, cat.tier,
             array_remove(array_agg(DISTINCT sku_stock.size) FILTER (WHERE sku_stock.qty - 2 > 0), NULL) AS sizes_available,
             (
                 SELECT ic.drive_file_id FROM b2b_catalog_images bci
@@ -148,7 +186,7 @@ async def list_catalog(
             (SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) AS image_count
         FROM cat
         LEFT JOIN sku_stock ON UPPER(TRIM(sku_stock.style_id)) = UPPER(TRIM(cat.style_id))
-        GROUP BY cat.style_id, cat.fabric, cat.category, cat.price
+        GROUP BY cat.style_id, cat.fabric, cat.category, cat.price, cat.tier
         {having_sql}
         ORDER BY cat.style_id ASC
         """,
@@ -165,9 +203,11 @@ async def list_catalog(
                 "sizes_available": sorted(r.get("sizes_available") or []),
                 "image_count": r.get("image_count") or 0,
                 "cover_image_id": r.get("thumb_file_id"),
+                "tier": "New" if collection == "new_arrivals" else _badge_for_tier(r.get("tier")),
             }
             for r in rows
-        ]
+        ],
+        "collection_title": _COLLECTIONS.get(collection, {}).get("title"),
     }
 
 
@@ -190,27 +230,37 @@ async def list_categories():
 
 @app.get("/api/home")
 async def home_sections(per_section: int = Query(12, ge=1, le=30)):
-    """Curated homepage sections, driven by real sales performance instead
-    of an arbitrary/random product order: "Diamond Sellers" and "Platinum
-    Sellers" are PricingManagementSystem's own Item Master "Sales Qty" tier
-    labels (computed from 3 months of actual unified sales), not anything
-    invented here. A style with no synced tier just doesn't appear in
-    either section - the full catalog is still reachable via /api/catalog
-    (the Search page)."""
+    """Curated homepage sections, driven by real data instead of an
+    arbitrary/random product order - never PricingManagementSystem's
+    internal tier jargon ("Diamond"/"Platinum"), always the public
+    `_COLLECTIONS` labels. "Best Sellers"/"Trending Now" come from Item
+    Master's "Sales Qty" tab (3 months of real unified sales, synced
+    on-demand into `sales_qty_remarks`); "New Arrivals" is simply the N
+    most-recently-added active styles (`b2b_catalog.added_at`, no sales-sync
+    step needed at all). A style with no synced sales tier and outside the
+    recently-added set just doesn't appear in any section - the full
+    catalog is still reachable via /search."""
     rows = fetch_all(
         f"""
         WITH {_ITEM_MASTER_CATEGORY_CTE},
         {_STYLE_TIER_CTE},
+        recent AS (
+            SELECT style_id FROM b2b_catalog WHERE is_active = TRUE ORDER BY added_at DESC LIMIT {_NEW_ARRIVALS_LIMIT}
+        ),
         cat AS (
             SELECT b.*, imc.category, st.tier
             FROM b2b_catalog b
             LEFT JOIN im_category imc ON imc.style_id = b.style_id
-            JOIN style_tier st ON st.style_id = b.style_id
-            WHERE b.is_active = TRUE AND st.tier IN ('Diamond A', 'Diamond B', 'Diamond C', 'Platinum A', 'Platinum B', 'Platinum C')
+            LEFT JOIN style_tier st ON st.style_id = b.style_id
+            WHERE b.is_active = TRUE
+              AND (
+                st.tier IN ('Diamond A', 'Diamond B', 'Diamond C', 'Platinum A', 'Platinum B', 'Platinum C')
+                OR b.style_id IN (SELECT style_id FROM recent)
+              )
         ),
         {_SKU_STOCK_CTE}
         SELECT
-            cat.style_id, cat.fabric, cat.category, cat.price, cat.tier,
+            cat.style_id, cat.fabric, cat.category, cat.price, cat.tier, cat.added_at,
             array_remove(array_agg(DISTINCT sku_stock.size) FILTER (WHERE sku_stock.qty - 2 > 0), NULL) AS sizes_available,
             (
                 SELECT ic.drive_file_id FROM b2b_catalog_images bci
@@ -221,13 +271,13 @@ async def home_sections(per_section: int = Query(12, ge=1, le=30)):
             (SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) AS image_count
         FROM cat
         LEFT JOIN sku_stock ON UPPER(TRIM(sku_stock.style_id)) = UPPER(TRIM(cat.style_id))
-        GROUP BY cat.style_id, cat.fabric, cat.category, cat.price, cat.tier
+        GROUP BY cat.style_id, cat.fabric, cat.category, cat.price, cat.tier, cat.added_at
         HAVING (SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) > 0
         ORDER BY cat.style_id ASC
         """
     )
 
-    def to_item(r):
+    def to_item(r, badge):
         return {
             "style_id": r["style_id"],
             "fabric": r.get("fabric") or "Cotton",
@@ -236,22 +286,40 @@ async def home_sections(per_section: int = Query(12, ge=1, le=30)):
             "sizes_available": sorted(r.get("sizes_available") or []),
             "image_count": r.get("image_count") or 0,
             "cover_image_id": r.get("thumb_file_id"),
-            "tier": r["tier"],
+            "tier": badge,
         }
 
-    diamond = sorted(
-        (to_item(r) for r in rows if r["tier"].startswith("Diamond")),
-        key=lambda it: (_TIER_RANK[it["tier"]], it["style_id"]),
+    # The homepage is meant to showcase what a buyer can actually order right
+    # now - an out-of-stock style earning a high sales tier or a recent
+    # add-date is still real, but doesn't belong here (it's still reachable
+    # via /search with "Include Out of Stock" checked).
+    def in_stock(r):
+        return bool(r.get("sizes_available"))
+
+    best_sellers = sorted(
+        (to_item(r, "Best Seller") for r in rows if r["tier"] in _BEST_SELLER_TIERS and in_stock(r)),
+        key=lambda it: it["style_id"],
     )[:per_section]
-    platinum = sorted(
-        (to_item(r) for r in rows if r["tier"].startswith("Platinum")),
-        key=lambda it: (_TIER_RANK[it["tier"]], it["style_id"]),
+    trending_now = sorted(
+        (to_item(r, "Trending") for r in rows if r["tier"] in _TRENDING_TIERS and in_stock(r)),
+        key=lambda it: it["style_id"],
     )[:per_section]
+    # `rows` is already restricted to (tier match OR in the top-N-most-recent
+    # set) by the SQL above, so sorting this subset by added_at and taking
+    # the top `per_section` correctly surfaces the truly most-recent styles
+    # without needing a separate query.
+    new_arrival_rows = sorted(
+        (r for r in rows if r["added_at"] is not None and in_stock(r)),
+        key=lambda r: r["added_at"],
+        reverse=True,
+    )
+    new_arrivals = [to_item(r, "New") for r in new_arrival_rows][:per_section]
 
     return {
         "sections": [
-            {"key": "diamond", "title": "Diamond Sellers", "subtitle": "Our top-performing styles by sales volume", "items": diamond},
-            {"key": "platinum", "title": "Platinum Sellers", "subtitle": "Consistently strong sellers", "items": platinum},
+            {"key": "best_sellers", **{k: v for k, v in _COLLECTIONS["best_sellers"].items() if k != "badge"}, "items": best_sellers},
+            {"key": "trending_now", **{k: v for k, v in _COLLECTIONS["trending_now"].items() if k != "badge"}, "items": trending_now},
+            {"key": "new_arrivals", **{k: v for k, v in _COLLECTIONS["new_arrivals"].items() if k != "badge"}, "items": new_arrivals},
         ]
     }
 
@@ -321,16 +389,21 @@ async def list_sizes():
 async def get_style(style_id: str):
     cat_row = fetch_one(
         f"""
-        WITH {_ITEM_MASTER_CATEGORY_CTE}
-        SELECT b.style_id, b.fabric, b.price, imc.category
+        WITH {_ITEM_MASTER_CATEGORY_CTE},
+        {_STYLE_TIER_CTE}
+        SELECT b.style_id, b.fabric, b.price, imc.category, st.tier,
+               b.style_id IN (SELECT style_id FROM b2b_catalog WHERE is_active = TRUE ORDER BY added_at DESC LIMIT {_NEW_ARRIVALS_LIMIT}) AS is_new_arrival
         FROM b2b_catalog b
         LEFT JOIN im_category imc ON imc.style_id = b.style_id
+        LEFT JOIN style_tier st ON st.style_id = b.style_id
         WHERE b.style_id = %s AND b.is_active = TRUE
         """,
         (style_id,),
     )
     if not cat_row:
         raise HTTPException(status_code=404, detail="Style not found")
+
+    badge = _badge_for_tier(cat_row.get("tier")) or ("New" if cat_row.get("is_new_arrival") else None)
 
     size_rows = fetch_all(
         f"""
@@ -363,6 +436,7 @@ async def get_style(style_id: str):
         "price": float(cat_row["price"]) if cat_row.get("price") is not None else None,
         "sizes_available": sizes_available,
         "images": images,
+        "tier": badge,
     }
 
 

@@ -28,6 +28,7 @@ export interface StyleDetail {
   price: number | null
   sizes_available: string[]
   images: CatalogImage[]
+  tier?: string
 }
 
 export interface CatalogFilters {
