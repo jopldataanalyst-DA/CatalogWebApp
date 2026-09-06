@@ -176,15 +176,33 @@ async def list_fabrics():
     return {"fabrics": [r["fabric"] for r in rows]}
 
 
-_SIZE_ORDER = ["XS", "S", "M", "L", "XL", "XXL", "XXXL", "3XL", "4XL", "5XL"]
+_BASE_SIZE_ORDER = ["XS", "S", "M", "L"]
+# "NXL" sizes (XL, XXL, 3XL, 4XL, ... 10XL, ...) sort by their numeric
+# multiplier, not alphabetically - alphabetical put "10XL" before "6XL"
+# (string '1' < '6') and "XL"/"XXL" out of order entirely.
+_NXL_RE = re.compile(r"^(\d*)X+L$", re.IGNORECASE)
+
+
+def _nxl_multiplier(size: str) -> Optional[int]:
+    m = _NXL_RE.match(size.upper())
+    if not m:
+        return None
+    digits, xl = m.group(1), m.group(0)
+    if digits:
+        return int(digits)
+    # No leading digit: count the X's (XL=1, XXL=2, XXXL=3, ...)
+    return xl.upper().count("X")
 
 
 def _size_sort_key(size: str):
-    if size in _SIZE_ORDER:
-        return (0, _SIZE_ORDER.index(size))
+    if size in _BASE_SIZE_ORDER:
+        return (0, _BASE_SIZE_ORDER.index(size), "")
+    nxl = _nxl_multiplier(size)
+    if nxl is not None:
+        return (1, nxl, "")
     if size.replace(".", "", 1).isdigit():
-        return (1, float(size))
-    return (2, size)
+        return (2, float(size), "")
+    return (3, 0, size)
 
 
 @app.get("/api/sizes")
