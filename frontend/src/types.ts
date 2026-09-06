@@ -21,3 +21,19 @@ export interface StyleDetail {
   sizes_available: string[]
   images: CatalogImage[]
 }
+
+export interface CatalogFilters {
+  categories: string[]
+  fabrics: string[]
+  sizes: string[]
+  priceMin: number | null
+  priceMax: number | null
+}
+
+export const EMPTY_FILTERS: CatalogFilters = {
+  categories: [],
+  fabrics: [],
+  sizes: [],
+  priceMin: null,
+  priceMax: null,
+}

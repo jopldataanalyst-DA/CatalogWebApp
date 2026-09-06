@@ -61,7 +61,14 @@ _ITEM_MASTER_CATEGORY_CTE = """
 
 
 @app.get("/api/catalog")
-async def list_catalog(search: str = Query("", description="Search by Style ID"), category: str = Query("", description="Filter by Category")):
+async def list_catalog(
+    search: str = Query("", description="Search by Style ID"),
+    categories: list[str] = Query([], description="Filter by Category (any of)"),
+    fabrics: list[str] = Query([], description="Filter by Fabric (any of)"),
+    sizes: list[str] = Query([], description="Filter by Size (any of, matches currently-in-stock sizes)"),
+    price_min: Optional[float] = Query(None),
+    price_max: Optional[float] = Query(None),
+):
     """Every active B2B Catalog style with at least one image, cover
     thumbnail, fabric, category, price, and the sizes currently in stock."""
     where = ["cat.is_active = TRUE"]
@@ -69,10 +76,28 @@ async def list_catalog(search: str = Query("", description="Search by Style ID")
     if search:
         where.append("cat.style_id ILIKE %s")
         params.append(f"%{search}%")
-    if category:
-        where.append("cat.category = %s")
-        params.append(category)
+    if categories:
+        where.append("cat.category = ANY(%s)")
+        params.append(categories)
+    if fabrics:
+        where.append("cat.fabric = ANY(%s)")
+        params.append(fabrics)
+    if price_min is not None:
+        where.append("cat.price >= %s")
+        params.append(price_min)
+    if price_max is not None:
+        where.append("cat.price <= %s")
+        params.append(price_max)
     where_sql = "WHERE " + " AND ".join(where)
+
+    having = ["(SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) > 0"]
+    having_params: list = []
+    if sizes:
+        having.append(
+            "array_remove(array_agg(DISTINCT sku_stock.size) FILTER (WHERE sku_stock.qty - 2 > 0), NULL) && %s"
+        )
+        having_params.append(sizes)
+    having_sql = "HAVING " + " AND ".join(having)
 
     rows = fetch_all(
         f"""
@@ -97,10 +122,10 @@ async def list_catalog(search: str = Query("", description="Search by Style ID")
         FROM cat
         LEFT JOIN sku_stock ON UPPER(TRIM(sku_stock.style_id)) = UPPER(TRIM(cat.style_id))
         GROUP BY cat.style_id, cat.fabric, cat.category, cat.price
-        HAVING (SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) > 0
+        {having_sql}
         ORDER BY cat.style_id ASC
         """,
-        tuple(params),
+        (*params, *having_params),
     )
 
     return {
@@ -122,7 +147,7 @@ async def list_catalog(search: str = Query("", description="Search by Style ID")
 @app.get("/api/categories")
 async def list_categories():
     """Distinct categories currently present in the active B2B Catalog -
-    powers the gallery's category filter chips."""
+    powers the sidebar's Category filter."""
     rows = fetch_all(
         f"""
         WITH {_ITEM_MASTER_CATEGORY_CTE}
@@ -134,6 +159,49 @@ async def list_categories():
         """
     )
     return {"categories": [r["category"] for r in rows]}
+
+
+@app.get("/api/fabrics")
+async def list_fabrics():
+    """Distinct fabrics currently present in the active B2B Catalog -
+    powers the sidebar's Fabric filter."""
+    rows = fetch_all(
+        "SELECT DISTINCT fabric FROM b2b_catalog WHERE is_active = TRUE AND fabric IS NOT NULL ORDER BY fabric ASC"
+    )
+    return {"fabrics": [r["fabric"] for r in rows]}
+
+
+_SIZE_ORDER = ["XS", "S", "M", "L", "XL", "XXL", "XXXL", "3XL", "4XL", "5XL"]
+
+
+def _size_sort_key(size: str):
+    if size in _SIZE_ORDER:
+        return (0, _SIZE_ORDER.index(size))
+    if size.replace(".", "", 1).isdigit():
+        return (1, float(size))
+    return (2, size)
+
+
+@app.get("/api/sizes")
+async def list_sizes():
+    """Distinct sizes currently in stock (qty - 2 > 0) across the active B2B
+    Catalog - powers the sidebar's Size filter. Uses the same live stock CTE
+    as everything else, so a size only appears here while it's actually
+    orderable somewhere in the catalog. Sorted in garment-size order
+    (XS..5XL, then numeric sizes, then anything else alphabetically) rather
+    than plain alphabetical, which would put "L" before "M" before "S" but
+    "XL" before "L" too - wrong reading order for a shopper."""
+    rows = fetch_all(
+        f"""
+        WITH {_SKU_STOCK_CTE}
+        SELECT DISTINCT sku_stock.size
+        FROM sku_stock
+        JOIN b2b_catalog b ON b.style_id = sku_stock.style_id AND b.is_active = TRUE
+        WHERE sku_stock.qty - 2 > 0
+        """
+    )
+    sizes = sorted((r["size"] for r in rows if r["size"]), key=_size_sort_key)
+    return {"sizes": sizes}
 
 
 @app.get("/api/catalog/{style_id}")
