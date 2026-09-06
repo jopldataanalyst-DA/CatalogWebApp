@@ -4,7 +4,12 @@ nixPkgs = ["nodejs", "python312"]
 [phases.install]
 cmds = [
   "python -m venv --copies /opt/venv && . /opt/venv/bin/activate && pip install -r backend/requirements.txt",
-  "cd frontend && npm install"
+  # package-lock.json was generated on Windows, so npm's optional-dependency
+  # resolution (github.com/npm/cli/issues/4828) omits the Linux-x64 native
+  # binaries for Tailwind v4's Rust engine (@tailwindcss/oxide) and its
+  # CSS parser (lightningcss) - install them explicitly, same workaround
+  # PricingModule's own root nixpacks.toml uses for @rolldown/binding.
+  "cd frontend && npm install && npm install @tailwindcss/oxide-linux-x64-gnu lightningcss-linux-x64-gnu --no-save"
 ]
 
 [phases.build]
