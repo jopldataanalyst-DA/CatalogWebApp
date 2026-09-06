@@ -118,7 +118,7 @@ export default function App() {
         {mobileFiltersOpen && (
           <div className="fixed inset-0 z-40 md:hidden">
             <div className="absolute inset-0 bg-black/50" onClick={() => setMobileFiltersOpen(false)} />
-            <div className="absolute inset-y-0 left-0 w-[85%] max-w-xs bg-[var(--color-paper)] p-5 shadow-2xl">
+            <div className="absolute inset-y-0 left-0 w-[85%] max-w-xs bg-[var(--color-paper)] p-5 shadow-2xl overflow-hidden">
               <FilterSidebar
                 categories={categories}
                 fabrics={fabrics}
