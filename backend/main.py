@@ -87,12 +87,17 @@ async def list_catalog(search: str = Query("", description="Search by Style ID")
         SELECT
             cat.style_id, cat.fabric, cat.category, cat.price,
             array_remove(array_agg(DISTINCT sku_stock.size) FILTER (WHERE sku_stock.qty - 2 > 0), NULL) AS sizes_available,
-            (SELECT MIN(drive_file_id) FROM image_collection ic WHERE ic.style_id = cat.style_id) AS thumb_file_id,
-            (SELECT COUNT(*) FROM image_collection ic WHERE ic.style_id = cat.style_id) AS image_count
+            (
+                SELECT ic.drive_file_id FROM b2b_catalog_images bci
+                JOIN image_collection ic ON ic.id = bci.image_id
+                WHERE bci.style_id = cat.style_id
+                ORDER BY bci.position, bci.id LIMIT 1
+            ) AS thumb_file_id,
+            (SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) AS image_count
         FROM cat
         LEFT JOIN sku_stock ON UPPER(TRIM(sku_stock.style_id)) = UPPER(TRIM(cat.style_id))
         GROUP BY cat.style_id, cat.fabric, cat.category, cat.price
-        HAVING (SELECT COUNT(*) FROM image_collection ic WHERE ic.style_id = cat.style_id) > 0
+        HAVING (SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) > 0
         ORDER BY cat.style_id ASC
         """,
         tuple(params),
@@ -156,7 +161,13 @@ async def get_style(style_id: str):
     sizes_available = sorted({r["size"] for r in size_rows if r.get("size") and (r.get("qty") or 0) - 2 > 0})
 
     image_rows = fetch_all(
-        "SELECT drive_file_id, filename FROM image_collection WHERE style_id = %s ORDER BY uploaded_at ASC",
+        """
+        SELECT ic.drive_file_id, ic.filename
+        FROM b2b_catalog_images bci
+        JOIN image_collection ic ON ic.id = bci.image_id
+        WHERE bci.style_id = %s
+        ORDER BY bci.position, bci.id
+        """,
         (style_id,),
     )
     images = [
