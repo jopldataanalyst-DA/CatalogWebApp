@@ -65,7 +65,7 @@ export function FilterSidebar({ categories, fabrics, sizes, filters, onChange, o
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-1">
+      <div className="flex-1 min-h-0 overflow-y-auto px-1">
         {categories.length > 0 && (
           <FilterSection title="Category">
             {categories.map(c => (

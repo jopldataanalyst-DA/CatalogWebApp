@@ -2,10 +2,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { Search, PackageSearch, SlidersHorizontal } from 'lucide-react'
 import { fetchCatalog, fetchCategories, fetchFabrics, fetchSizes } from './api'
 import { FilterSidebar } from './components/FilterSidebar'
+import { Pagination } from './components/Pagination'
 import { StyleCard } from './components/StyleCard'
 import { StyleDetailModal } from './components/StyleDetail'
 import type { CatalogFilters, CatalogItem } from './types'
 import { EMPTY_FILTERS } from './types'
+
+const DEFAULT_PAGE_SIZE = 12
 
 function useDebounced<T>(value: T, delay: number): T {
   const [debounced, setDebounced] = useState(value)
@@ -27,6 +30,8 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [openStyle, setOpenStyle] = useState<string | null>(null)
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
 
   useEffect(() => {
     fetchCategories().then(d => setCategories(d.categories)).catch(() => {})
@@ -45,6 +50,16 @@ export default function App() {
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [debouncedSearch, filters])
+
+  // A new search/filter changes what "page 1" even means, so always snap
+  // back there rather than leaving the viewer stranded on a now out-of-range page.
+  useEffect(() => { setPage(1) }, [debouncedSearch, filters, pageSize])
+
+  const totalPages = Math.max(1, Math.ceil(items.length / pageSize))
+  const pagedItems = useMemo(
+    () => items.slice((page - 1) * pageSize, page * pageSize),
+    [items, page, pageSize],
+  )
 
   const emptyState = useMemo(() => !loading && items.length === 0, [loading, items])
   const activeFilterCount =
@@ -91,7 +106,11 @@ export default function App() {
 
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-6 sm:py-8 flex gap-8">
         <aside className="hidden md:block w-60 shrink-0">
-          <div className="sticky top-24">
+          {/* Pinned under the header, with its own scroll region (max-h +
+              overflow-y-auto on FilterSidebar itself) - a long Category list
+              scrolls independently of the page instead of dragging the
+              whole sidebar out of view as the grid below scrolls. */}
+          <div className="sticky top-24 max-h-[calc(100vh-7rem)]">
             <FilterSidebar categories={categories} fabrics={fabrics} sizes={sizes} filters={filters} onChange={setFilters} />
           </div>
         </aside>
@@ -114,8 +133,8 @@ export default function App() {
 
         <main className="flex-1 min-w-0">
           {loading ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
-              {Array.from({ length: 10 }).map((_, i) => (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 sm:gap-5">
+              {Array.from({ length: pageSize }).map((_, i) => (
                 <div key={i} className="animate-pulse rounded-2xl overflow-hidden border border-[var(--color-line)]">
                   <div className="aspect-[3/4] bg-[var(--color-paper2)]" />
                   <div className="p-4 space-y-2">
@@ -131,11 +150,21 @@ export default function App() {
               <p className="text-sm">No styles match your filters.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
-              {items.map(item => (
-                <StyleCard key={item.style_id} item={item} onOpen={() => setOpenStyle(item.style_id)} />
-              ))}
-            </div>
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4 sm:gap-5">
+                {pagedItems.map(item => (
+                  <StyleCard key={item.style_id} item={item} onOpen={() => setOpenStyle(item.style_id)} />
+                ))}
+              </div>
+              <Pagination
+                page={page}
+                totalPages={totalPages}
+                pageSize={pageSize}
+                total={items.length}
+                onPageChange={setPage}
+                onPageSizeChange={setPageSize}
+              />
+            </>
           )}
         </main>
       </div>
