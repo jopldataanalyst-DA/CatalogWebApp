@@ -63,7 +63,12 @@ export default function App() {
 
   const emptyState = useMemo(() => !loading && items.length === 0, [loading, items])
   const activeFilterCount =
-    filters.categories.length + filters.fabrics.length + filters.sizes.length + (filters.priceMin != null ? 1 : 0) + (filters.priceMax != null ? 1 : 0)
+    filters.categories.length +
+    filters.fabrics.length +
+    filters.sizes.length +
+    (filters.priceMin != null ? 1 : 0) +
+    (filters.priceMax != null ? 1 : 0) +
+    (filters.includeOutOfStock ? 1 : 0)
 
   return (
     <div className="min-h-screen">

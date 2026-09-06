@@ -42,7 +42,12 @@ function CheckRow({ label, checked, onClick }: { label: string; checked: boolean
 
 export function FilterSidebar({ categories, fabrics, sizes, filters, onChange, onCloseMobile }: Props) {
   const activeCount =
-    filters.categories.length + filters.fabrics.length + filters.sizes.length + (filters.priceMin != null ? 1 : 0) + (filters.priceMax != null ? 1 : 0)
+    filters.categories.length +
+    filters.fabrics.length +
+    filters.sizes.length +
+    (filters.priceMin != null ? 1 : 0) +
+    (filters.priceMax != null ? 1 : 0) +
+    (filters.includeOutOfStock ? 1 : 0)
 
   return (
     <div className="h-full flex flex-col">
@@ -66,6 +71,14 @@ export function FilterSidebar({ categories, fabrics, sizes, filters, onChange, o
       </div>
 
       <div className="filter-scroll flex-1 min-h-0 overflow-y-auto px-1">
+        <FilterSection title="Availability">
+          <CheckRow
+            label="Include Out of Stock"
+            checked={filters.includeOutOfStock}
+            onClick={() => onChange({ ...filters, includeOutOfStock: !filters.includeOutOfStock })}
+          />
+        </FilterSection>
+
         {categories.length > 0 && (
           <FilterSection title="Category">
             {categories.map(c => (

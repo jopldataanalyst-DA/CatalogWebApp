@@ -28,6 +28,7 @@ export interface CatalogFilters {
   sizes: string[]
   priceMin: number | null
   priceMax: number | null
+  includeOutOfStock: boolean
 }
 
 export const EMPTY_FILTERS: CatalogFilters = {
@@ -36,4 +37,5 @@ export const EMPTY_FILTERS: CatalogFilters = {
   sizes: [],
   priceMin: null,
   priceMax: null,
+  includeOutOfStock: false,
 }

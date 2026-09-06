@@ -15,6 +15,7 @@ export function fetchCatalog(search: string, filters: CatalogFilters): Promise<{
   filters.sizes.forEach(s => params.append('sizes', s))
   if (filters.priceMin != null) params.set('price_min', String(filters.priceMin))
   if (filters.priceMax != null) params.set('price_max', String(filters.priceMax))
+  if (filters.includeOutOfStock) params.set('include_out_of_stock', 'true')
   return get(`/api/catalog?${params.toString()}`)
 }
 

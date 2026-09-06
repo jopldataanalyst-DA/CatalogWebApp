@@ -68,6 +68,7 @@ async def list_catalog(
     sizes: list[str] = Query([], description="Filter by Size (any of, matches currently-in-stock sizes)"),
     price_min: Optional[float] = Query(None),
     price_max: Optional[float] = Query(None),
+    include_out_of_stock: bool = Query(False, description="Show styles with zero sizes currently in stock too"),
 ):
     """Every active B2B Catalog style with at least one image, cover
     thumbnail, fabric, category, price, and the sizes currently in stock."""
@@ -92,6 +93,10 @@ async def list_catalog(
 
     having = ["(SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) > 0"]
     having_params: list = []
+    if not include_out_of_stock:
+        having.append(
+            "array_length(array_remove(array_agg(DISTINCT sku_stock.size) FILTER (WHERE sku_stock.qty - 2 > 0), NULL), 1) > 0"
+        )
     if sizes:
         having.append(
             "array_remove(array_agg(DISTINCT sku_stock.size) FILTER (WHERE sku_stock.qty - 2 > 0), NULL) && %s"
