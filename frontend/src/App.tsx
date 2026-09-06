@@ -106,11 +106,14 @@ export default function App() {
 
       <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-6 sm:py-8 flex gap-8">
         <aside className="hidden md:block w-60 shrink-0">
-          {/* Pinned under the header, with its own scroll region (max-h +
-              overflow-y-auto on FilterSidebar itself) - a long Category list
-              scrolls independently of the page instead of dragging the
-              whole sidebar out of view as the grid below scrolls. */}
-          <div className="sticky top-24 max-h-[calc(100vh-7rem)]">
+          {/* Pinned under the header, with its own scroll region (a
+              DEFINITE height + overflow-hidden here, since max-height alone
+              doesn't give FilterSidebar's h-full/100% a real height to
+              resolve against - it was silently falling back to auto,
+              which is why the inner scroll never actually engaged) - a long
+              Category list scrolls independently of the page instead of
+              dragging the whole sidebar out of view as the grid scrolls. */}
+          <div className="sticky top-24 h-[calc(100vh-7rem)] overflow-hidden">
             <FilterSidebar categories={categories} fabrics={fabrics} sizes={sizes} filters={filters} onChange={setFilters} />
           </div>
         </aside>
