@@ -29,6 +29,11 @@ export function StyleCard({ item, onOpen }: { item: CatalogItem; onOpen: () => v
             Out of stock
           </span>
         )}
+        {item.tier && (
+          <span className="absolute bottom-3 left-3 bg-[var(--color-gold)] text-white text-[10px] font-semibold tracking-wide uppercase px-2.5 py-1 rounded-full shadow">
+            {item.tier}
+          </span>
+        )}
       </div>
       <div className="p-4 space-y-2">
         <div className="flex items-baseline justify-between gap-2">

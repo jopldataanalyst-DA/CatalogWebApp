@@ -59,6 +59,28 @@ _ITEM_MASTER_CATEGORY_CTE = """
     )
 """
 
+# Style-level sales tier ("Diamond A/B/C", "Platinum A/B/C", "Slow Moving",
+# "New Listing", ...) from PricingManagementSystem's Item Master "Sales Qty"
+# tab - computed there from 3 months of real unified sales data, synced
+# on-demand into `sales_qty_remarks` (keyed by Master SKU). Every SKU under
+# one style carries the same style-level ("parent") remark, so DISTINCT ON
+# picks any one of them per style; a style with no synced remark yet (never
+# run through that tab, or genuinely has none) simply won't appear in a
+# tier-based homepage section - not an error, just unclassified.
+_STYLE_TIER_CTE = """
+    style_tier AS (
+        SELECT DISTINCT ON (im."Style ID / Parent SKU")
+            im."Style ID / Parent SKU" AS style_id,
+            sqr.computed_parent_remark AS tier
+        FROM item_master im
+        JOIN sales_qty_remarks sqr ON sqr.master_sku = im."Master SKU"
+        WHERE im."Style ID / Parent SKU" IS NOT NULL AND im."Style ID / Parent SKU" != ''
+        ORDER BY im."Style ID / Parent SKU", sqr.updated_at DESC
+    )
+"""
+
+_TIER_RANK = {"Diamond A": 0, "Diamond B": 1, "Diamond C": 2, "Platinum A": 3, "Platinum B": 4, "Platinum C": 5}
+
 
 @app.get("/api/catalog")
 async def list_catalog(
@@ -164,6 +186,74 @@ async def list_categories():
         """
     )
     return {"categories": [r["category"] for r in rows]}
+
+
+@app.get("/api/home")
+async def home_sections(per_section: int = Query(12, ge=1, le=30)):
+    """Curated homepage sections, driven by real sales performance instead
+    of an arbitrary/random product order: "Diamond Sellers" and "Platinum
+    Sellers" are PricingManagementSystem's own Item Master "Sales Qty" tier
+    labels (computed from 3 months of actual unified sales), not anything
+    invented here. A style with no synced tier just doesn't appear in
+    either section - the full catalog is still reachable via /api/catalog
+    (the Search page)."""
+    rows = fetch_all(
+        f"""
+        WITH {_ITEM_MASTER_CATEGORY_CTE},
+        {_STYLE_TIER_CTE},
+        cat AS (
+            SELECT b.*, imc.category, st.tier
+            FROM b2b_catalog b
+            LEFT JOIN im_category imc ON imc.style_id = b.style_id
+            JOIN style_tier st ON st.style_id = b.style_id
+            WHERE b.is_active = TRUE AND st.tier IN ('Diamond A', 'Diamond B', 'Diamond C', 'Platinum A', 'Platinum B', 'Platinum C')
+        ),
+        {_SKU_STOCK_CTE}
+        SELECT
+            cat.style_id, cat.fabric, cat.category, cat.price, cat.tier,
+            array_remove(array_agg(DISTINCT sku_stock.size) FILTER (WHERE sku_stock.qty - 2 > 0), NULL) AS sizes_available,
+            (
+                SELECT ic.drive_file_id FROM b2b_catalog_images bci
+                JOIN image_collection ic ON ic.id = bci.image_id
+                WHERE bci.style_id = cat.style_id
+                ORDER BY bci.position, bci.id LIMIT 1
+            ) AS thumb_file_id,
+            (SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) AS image_count
+        FROM cat
+        LEFT JOIN sku_stock ON UPPER(TRIM(sku_stock.style_id)) = UPPER(TRIM(cat.style_id))
+        GROUP BY cat.style_id, cat.fabric, cat.category, cat.price, cat.tier
+        HAVING (SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) > 0
+        ORDER BY cat.style_id ASC
+        """
+    )
+
+    def to_item(r):
+        return {
+            "style_id": r["style_id"],
+            "fabric": r.get("fabric") or "Cotton",
+            "category": r.get("category") or "Unknown",
+            "price": float(r["price"]) if r.get("price") is not None else None,
+            "sizes_available": sorted(r.get("sizes_available") or []),
+            "image_count": r.get("image_count") or 0,
+            "cover_image_id": r.get("thumb_file_id"),
+            "tier": r["tier"],
+        }
+
+    diamond = sorted(
+        (to_item(r) for r in rows if r["tier"].startswith("Diamond")),
+        key=lambda it: (_TIER_RANK[it["tier"]], it["style_id"]),
+    )[:per_section]
+    platinum = sorted(
+        (to_item(r) for r in rows if r["tier"].startswith("Platinum")),
+        key=lambda it: (_TIER_RANK[it["tier"]], it["style_id"]),
+    )[:per_section]
+
+    return {
+        "sections": [
+            {"key": "diamond", "title": "Diamond Sellers", "subtitle": "Our top-performing styles by sales volume", "items": diamond},
+            {"key": "platinum", "title": "Platinum Sellers", "subtitle": "Consistently strong sellers", "items": platinum},
+        ]
+    }
 
 
 @app.get("/api/fabrics")

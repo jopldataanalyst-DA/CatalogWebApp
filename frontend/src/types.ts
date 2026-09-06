@@ -6,6 +6,14 @@ export interface CatalogItem {
   sizes_available: string[]
   image_count: number
   cover_image_id: string | null
+  tier?: string
+}
+
+export interface HomeSection {
+  key: string
+  title: string
+  subtitle: string
+  items: CatalogItem[]
 }
 
 export interface CatalogImage {

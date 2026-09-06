@@ -1,4 +1,4 @@
-import type { CatalogItem, StyleDetail } from './types'
+import type { CatalogItem, HomeSection, StyleDetail } from './types'
 import type { CatalogFilters } from './types'
 
 async function get<T>(url: string): Promise<T> {
@@ -17,6 +17,10 @@ export function fetchCatalog(search: string, filters: CatalogFilters): Promise<{
   if (filters.priceMax != null) params.set('price_max', String(filters.priceMax))
   if (filters.includeOutOfStock) params.set('include_out_of_stock', 'true')
   return get(`/api/catalog?${params.toString()}`)
+}
+
+export function fetchHome(): Promise<{ sections: HomeSection[] }> {
+  return get('/api/home')
 }
 
 export function fetchCategories(): Promise<{ categories: string[] }> {
