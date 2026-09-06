@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { X, ChevronLeft, ChevronRight, ImageOff } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, ImageOff, Loader2 } from 'lucide-react'
 import { fetchStyle, imageUrl } from '../api'
 import type { StyleDetail as StyleDetailType } from '../types'
 
@@ -7,6 +7,7 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
   const [data, setData] = useState<StyleDetailType | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeIdx, setActiveIdx] = useState(0)
+  const [imageLoaded, setImageLoaded] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -16,6 +17,11 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [styleId])
+
+  // Reset the per-image loading flag whenever the shown image changes, so
+  // switching slides shows the spinner again instead of the previous image
+  // lingering (or a flash of the "no images" state) while the new one fetches.
+  useEffect(() => { setImageLoaded(false) }, [activeIdx, data])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -33,12 +39,19 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
         onClick={e => e.stopPropagation()}
       >
         <div className="relative bg-[var(--color-ink)] aspect-square md:aspect-auto md:h-full flex items-center justify-center">
-          {images.length > 0 ? (
+          {loading ? (
+            <Loader2 size={28} className="text-white/40 animate-spin" />
+          ) : images.length > 0 ? (
             <>
+              {!imageLoaded && (
+                <Loader2 size={28} className="absolute text-white/40 animate-spin" />
+              )}
               <img
+                key={images[activeIdx].drive_file_id}
                 src={imageUrl(images[activeIdx].drive_file_id, 'w1200')}
                 alt={data?.style_id}
-                className="w-full h-full object-contain"
+                onLoad={() => setImageLoaded(true)}
+                className={`w-full h-full object-contain transition-opacity duration-200 ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
               />
               {images.length > 1 && (
                 <>
