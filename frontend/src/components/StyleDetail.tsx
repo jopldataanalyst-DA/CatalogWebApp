@@ -38,13 +38,13 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
         className="bg-[var(--color-paper)] w-full max-w-4xl max-h-[92vh] rounded-2xl overflow-hidden shadow-2xl grid grid-cols-1 md:grid-cols-2"
         onClick={e => e.stopPropagation()}
       >
-        <div className="relative bg-[var(--color-ink)] aspect-square md:aspect-auto md:h-full flex items-center justify-center">
+        <div className="relative bg-white aspect-square md:aspect-auto md:h-full flex items-center justify-center border-r border-[var(--color-line)]">
           {loading ? (
-            <Loader2 size={28} className="text-white/40 animate-spin" />
+            <Loader2 size={28} className="text-[var(--color-ink)]/25 animate-spin" />
           ) : images.length > 0 ? (
             <>
               {!imageLoaded && (
-                <Loader2 size={28} className="absolute text-white/40 animate-spin" />
+                <Loader2 size={28} className="absolute text-[var(--color-ink)]/25 animate-spin" />
               )}
               <img
                 key={images[activeIdx].drive_file_id}
@@ -57,14 +57,14 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
                 <>
                   <button
                     onClick={() => setActiveIdx(i => (i - 1 + images.length) % images.length)}
-                    className="absolute left-2 top-1/2 -translate-y-1/2 bg-white/15 hover:bg-white/30 text-white rounded-full p-1.5"
+                    className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/5 hover:bg-black/10 text-[var(--color-ink)] rounded-full p-1.5"
                     aria-label="Previous image"
                   >
                     <ChevronLeft size={18} />
                   </button>
                   <button
                     onClick={() => setActiveIdx(i => (i + 1) % images.length)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-white/15 hover:bg-white/30 text-white rounded-full p-1.5"
+                    className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/5 hover:bg-black/10 text-[var(--color-ink)] rounded-full p-1.5"
                     aria-label="Next image"
                   >
                     <ChevronRight size={18} />
@@ -74,7 +74,7 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
                       <button
                         key={i}
                         onClick={() => setActiveIdx(i)}
-                        className={`w-1.5 h-1.5 rounded-full transition-all ${i === activeIdx ? 'bg-white w-4' : 'bg-white/40'}`}
+                        className={`w-1.5 h-1.5 rounded-full transition-all ${i === activeIdx ? 'bg-[var(--color-gold)] w-4' : 'bg-[var(--color-ink)]/20'}`}
                         aria-label={`Image ${i + 1}`}
                       />
                     ))}
@@ -83,7 +83,7 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
               )}
             </>
           ) : (
-            <div className="text-white/40 flex flex-col items-center gap-2">
+            <div className="text-[var(--color-ink)]/30 flex flex-col items-center gap-2">
               <ImageOff size={32} />
               <span className="text-xs">No images</span>
             </div>
