@@ -405,13 +405,20 @@ async def get_style(style_id: str):
         {_STYLE_TIER_CTE},
         {_SKU_PRICE_AVG_CTE}
         SELECT b.style_id, b.fabric, COALESCE(spa.avg_price, b.price) AS price, imc.category, st.tier,
-               clm.b2b_category, clm.length_type, clm.top_length, clm.bottom_length,
+               -- Per-style override (fit) wins over the shared category
+               -- default (clm) - same PricingManagementSystem admin edit
+               -- (pencil icon -> per-style fit) that sets this table.
+               COALESCE(fit.b2b_category, clm.b2b_category) AS b2b_category,
+               COALESCE(fit.length_type, clm.length_type) AS length_type,
+               COALESCE(fit.top_length, clm.top_length) AS top_length,
+               COALESCE(fit.bottom_length, clm.bottom_length) AS bottom_length,
                b.style_id IN (SELECT style_id FROM b2b_catalog WHERE is_active = TRUE ORDER BY added_at DESC LIMIT {_NEW_ARRIVALS_LIMIT}) AS is_new_arrival
         FROM b2b_catalog b
         LEFT JOIN im_category imc ON imc.style_id = b.style_id
         LEFT JOIN style_tier st ON st.style_id = b.style_id
         LEFT JOIN sku_price_avg spa ON spa.style_id = b.style_id
         LEFT JOIN category_length_map clm ON clm.category = imc.category
+        LEFT JOIN b2b_catalog_style_fit fit ON fit.style_id = b.style_id
         WHERE b.style_id = %s AND b.is_active = TRUE
         """,
         (style_id,),
