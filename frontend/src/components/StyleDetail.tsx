@@ -1,9 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import { X, ChevronLeft, ChevronRight, ImageOff, Loader2 } from 'lucide-react'
 import { fetchStyle, imageUrl } from '../api'
-import type { StyleDetail as StyleDetailType } from '../types'
+import type { SizePrice, StyleDetail as StyleDetailType } from '../types'
 
 const SWIPE_THRESHOLD_PX = 50
+
+// Collapses consecutive same-price sizes into one row (e.g. "S XL XXL" at
+// ₹500, "3XL 5XL 6XL" at ₹575) instead of a separate row per size -
+// sizes_available/size_prices already arrive in garment order from the
+// backend, so grouping by adjacency here is enough; no re-sorting needed.
+function groupSizesByPrice(sizePrices: SizePrice[]): { sizes: string[]; price: number | null }[] {
+  const groups: { sizes: string[]; price: number | null }[] = []
+  for (const { size, price } of sizePrices) {
+    const last = groups[groups.length - 1]
+    if (last && last.price === price) last.sizes.push(size)
+    else groups.push({ sizes: [size], price })
+  }
+  return groups
+}
 
 export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClose: () => void }) {
   const [data, setData] = useState<StyleDetailType | null>(null)
@@ -236,14 +250,11 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
                     <dt className="text-[var(--color-gold-dark)] text-xs uppercase tracking-wide font-semibold mb-3">
                       Price by Size
                     </dt>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                      {data.size_prices.map(({ size, price }) => (
-                        <div
-                          key={size}
-                          className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[var(--color-paper)] border border-[var(--color-gold)]/30"
-                        >
-                          <span className="text-sm font-semibold">{size}</span>
-                          <span className="text-sm text-[var(--color-ink)]/60">
+                    <div className="divide-y divide-[var(--color-gold)]/20">
+                      {groupSizesByPrice(data.size_prices).map(({ sizes, price }) => (
+                        <div key={sizes.join('-')} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
+                          <span className="text-sm font-semibold tracking-wide">{sizes.join('  ')}</span>
+                          <span className="text-sm text-[var(--color-ink)]/60 shrink-0">
                             {price != null ? `₹${price.toLocaleString('en-IN')}` : '—'}
                           </span>
                         </div>
@@ -269,6 +280,38 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
                 <div>
                   <dt className="text-[var(--color-ink)]/50 text-xs uppercase tracking-wide mb-2">Available Sizes</dt>
                   <p className="text-sm text-[var(--color-ink)]/40">Currently out of stock</p>
+                </div>
+              )}
+
+              {(data.fit.b2b_category || data.fit.length_type || data.fit.top_length != null || data.fit.bottom_length != null) && (
+                <div>
+                  <dt className="text-[var(--color-ink)]/50 text-xs uppercase tracking-wide mb-2">Fit Details</dt>
+                  <dl className="grid grid-cols-2 gap-4 text-sm">
+                    {data.fit.b2b_category && (
+                      <div>
+                        <dt className="text-[var(--color-ink)]/50 text-xs mb-0.5">B2B Category</dt>
+                        <dd className="font-medium">{data.fit.b2b_category}</dd>
+                      </div>
+                    )}
+                    {data.fit.length_type && (
+                      <div>
+                        <dt className="text-[var(--color-ink)]/50 text-xs mb-0.5">Length Type</dt>
+                        <dd className="font-medium">{data.fit.length_type}</dd>
+                      </div>
+                    )}
+                    {data.fit.top_length != null && (
+                      <div>
+                        <dt className="text-[var(--color-ink)]/50 text-xs mb-0.5">Top Length</dt>
+                        <dd className="font-medium">{data.fit.top_length}"</dd>
+                      </div>
+                    )}
+                    {data.fit.bottom_length != null && (
+                      <div>
+                        <dt className="text-[var(--color-ink)]/50 text-xs mb-0.5">Bottom Length</dt>
+                        <dd className="font-medium">{data.fit.bottom_length}"</dd>
+                      </div>
+                    )}
+                  </dl>
                 </div>
               )}
 

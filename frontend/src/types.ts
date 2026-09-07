@@ -26,6 +26,13 @@ export interface SizePrice {
   price: number | null
 }
 
+export interface FitDetails {
+  b2b_category: string | null
+  length_type: string | null
+  top_length: number | null
+  bottom_length: number | null
+}
+
 export interface StyleDetail {
   style_id: string
   fabric: string
@@ -37,6 +44,7 @@ export interface StyleDetail {
   size_prices: SizePrice[]
   images: CatalogImage[]
   tier?: string
+  fit: FitDetails
 }
 
 export interface CatalogFilters {

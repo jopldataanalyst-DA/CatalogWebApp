@@ -405,11 +405,13 @@ async def get_style(style_id: str):
         {_STYLE_TIER_CTE},
         {_SKU_PRICE_AVG_CTE}
         SELECT b.style_id, b.fabric, COALESCE(spa.avg_price, b.price) AS price, imc.category, st.tier,
+               clm.b2b_category, clm.length_type, clm.top_length, clm.bottom_length,
                b.style_id IN (SELECT style_id FROM b2b_catalog WHERE is_active = TRUE ORDER BY added_at DESC LIMIT {_NEW_ARRIVALS_LIMIT}) AS is_new_arrival
         FROM b2b_catalog b
         LEFT JOIN im_category imc ON imc.style_id = b.style_id
         LEFT JOIN style_tier st ON st.style_id = b.style_id
         LEFT JOIN sku_price_avg spa ON spa.style_id = b.style_id
+        LEFT JOIN category_length_map clm ON clm.category = imc.category
         WHERE b.style_id = %s AND b.is_active = TRUE
         """,
         (style_id,),
@@ -483,6 +485,12 @@ async def get_style(style_id: str):
         "size_prices": size_prices if has_varying_prices else [],
         "images": images,
         "tier": badge,
+        "fit": {
+            "b2b_category": cat_row.get("b2b_category"),
+            "length_type": cat_row.get("length_type"),
+            "top_length": float(cat_row["top_length"]) if cat_row.get("top_length") is not None else None,
+            "bottom_length": float(cat_row["bottom_length"]) if cat_row.get("bottom_length") is not None else None,
+        },
     }
 
 
