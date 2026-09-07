@@ -9,9 +9,11 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
   const [data, setData] = useState<StyleDetailType | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeIdx, setActiveIdx] = useState(0)
-  const [imageLoaded, setImageLoaded] = useState(false)
   const dragStartX = useRef<number | null>(null)
   const [dragDeltaX, setDragDeltaX] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  const trackRef = useRef<HTMLDivElement>(null)
+  const [trackWidth, setTrackWidth] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -35,11 +37,6 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
     return () => { cancelled = true }
   }, [styleId])
 
-  // Reset the per-image loading flag whenever the shown image changes, so
-  // switching slides shows the spinner again instead of the previous image
-  // lingering (or a flash of the "no images" state) while the new one fetches.
-  useEffect(() => { setImageLoaded(false) }, [activeIdx, data])
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -52,6 +49,19 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onClose])
 
+  // Track the carousel's own pixel width so a drag's translateX can be
+  // expressed as a percentage of it - keeps the drag 1:1 with the pointer
+  // regardless of viewport size, and resizing (e.g. rotating a phone)
+  // doesn't leave the slide mid-way between two images.
+  useEffect(() => {
+    const el = trackRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => setTrackWidth(entries[0].contentRect.width))
+    setTrackWidth(el.clientWidth)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
   const images = data?.images ?? []
 
   const goPrev = () => setActiveIdx(i => (i - 1 + images.length) % images.length)
@@ -60,6 +70,7 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
   const onPointerDown = (e: React.PointerEvent) => {
     if (images.length < 2) return
     dragStartX.current = e.clientX
+    setDragging(true)
     ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
   }
   const onPointerMove = (e: React.PointerEvent) => {
@@ -71,7 +82,19 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
     if (dragDeltaX > SWIPE_THRESHOLD_PX) goPrev()
     else if (dragDeltaX < -SWIPE_THRESHOLD_PX) goNext()
     dragStartX.current = null
+    setDragging(false)
     setDragDeltaX(0)
+  }
+
+  // Percentage-based slide offset (like Amazon/Flipkart's PDP gallery) -
+  // a flex track holding every image side by side, shifted by -100% per
+  // slide plus however far the pointer has dragged, animated with a
+  // smooth ease-out on release/click and no transition while actively
+  // dragging (so it tracks the finger/cursor exactly).
+  const dragPercent = trackWidth > 0 ? (dragDeltaX / trackWidth) * 100 : 0
+  const trackStyle: React.CSSProperties = {
+    transform: `translateX(calc(${-activeIdx * 100}% + ${dragPercent}%))`,
+    transition: dragging ? 'none' : 'transform 380ms cubic-bezier(0.22, 1, 0.36, 1)',
   }
 
   return (
@@ -81,28 +104,32 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
         onClick={e => e.stopPropagation()}
       >
         <div
-          className="relative bg-white aspect-square md:aspect-auto md:h-full flex items-center justify-center border-r border-[var(--color-line)] touch-pan-y select-none"
+          className="relative bg-white aspect-square md:aspect-auto md:h-full overflow-hidden border-r border-[var(--color-line)] touch-pan-y select-none"
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
-          style={{ cursor: images.length > 1 ? 'grab' : 'default' }}
+          style={{ cursor: images.length > 1 ? (dragging ? 'grabbing' : 'grab') : 'default' }}
         >
           {loading ? (
-            <Loader2 size={28} className="text-[var(--color-ink)]/25 animate-spin" />
+            <div className="w-full h-full flex items-center justify-center">
+              <Loader2 size={28} className="text-[var(--color-ink)]/25 animate-spin" />
+            </div>
           ) : images.length > 0 ? (
             <>
-              {!imageLoaded && (
-                <Loader2 size={28} className="absolute text-[var(--color-ink)]/25 animate-spin" />
-              )}
-              <img
-                key={images[activeIdx].drive_file_id}
-                src={imageUrl(images[activeIdx].drive_file_id, 'w1200')}
-                alt={data?.style_id}
-                onLoad={() => setImageLoaded(true)}
-                draggable={false}
-                className={`w-full h-full object-contain transition-opacity duration-200 pointer-events-none ${imageLoaded ? 'opacity-100' : 'opacity-0'}`}
-              />
+              <div ref={trackRef} className="flex w-full h-full" style={trackStyle}>
+                {images.map((img, i) => (
+                  <div key={img.drive_file_id} className="w-full h-full shrink-0 flex items-center justify-center">
+                    <img
+                      src={imageUrl(img.drive_file_id, 'w1200')}
+                      alt={data?.style_id}
+                      draggable={false}
+                      loading={Math.abs(i - activeIdx) <= 1 ? 'eager' : 'lazy'}
+                      className="w-full h-full object-contain pointer-events-none"
+                    />
+                  </div>
+                ))}
+              </div>
               {images.length > 1 && (
                 <>
                   <button
@@ -133,7 +160,7 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
               )}
             </>
           ) : (
-            <div className="text-[var(--color-ink)]/30 flex flex-col items-center gap-2">
+            <div className="w-full h-full flex flex-col items-center justify-center gap-2 text-[var(--color-ink)]/30">
               <ImageOff size={32} />
               <span className="text-xs">No images</span>
             </div>
@@ -198,40 +225,76 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
                 </div>
               </dl>
 
-              <div>
-                <dt className="text-[var(--color-ink)]/50 text-xs uppercase tracking-wide mb-2">Available Sizes</dt>
-                {data.sizes_available.length > 0 ? (
-                  <div className="flex flex-wrap gap-2">
-                    {data.size_prices.length > 0 ? (
-                      // Prices genuinely differ by size - show each chip as
-                      // size-over-price so a buyer can tell at a glance
-                      // which sizes cost more, instead of one flat number.
-                      data.size_prices.map(({ size, price }) => (
+              {data.sizes_available.length > 0 ? (
+                data.size_prices.length > 0 ? (
+                  // Prices genuinely differ by size - its own clearly
+                  // separated card (distinct border/background) rather
+                  // than folded into a plain "Available Sizes" chip row,
+                  // so a buyer immediately reads it as "size changes the
+                  // price" instead of mistaking it for just a size list.
+                  <div className="rounded-xl border border-[var(--color-gold)]/40 bg-[var(--color-gold)]/5 p-4">
+                    <dt className="text-[var(--color-gold-dark)] text-xs uppercase tracking-wide font-semibold mb-3">
+                      Price by Size
+                    </dt>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                      {data.size_prices.map(({ size, price }) => (
                         <div
                           key={size}
-                          className="flex flex-col items-center px-3 py-1.5 rounded-lg border border-[var(--color-gold)]/50 bg-[var(--color-gold)]/10 text-[var(--color-gold-dark)] min-w-[3.5rem]"
+                          className="flex items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[var(--color-paper)] border border-[var(--color-gold)]/30"
                         >
-                          <span className="text-sm font-medium">{size}</span>
-                          <span className="text-[11px] text-[var(--color-ink)]/50">
+                          <span className="text-sm font-semibold">{size}</span>
+                          <span className="text-sm text-[var(--color-ink)]/60">
                             {price != null ? `₹${price.toLocaleString('en-IN')}` : '—'}
                           </span>
                         </div>
-                      ))
-                    ) : (
-                      data.sizes_available.map(sz => (
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <dt className="text-[var(--color-ink)]/50 text-xs uppercase tracking-wide mb-2">Available Sizes</dt>
+                    <div className="flex flex-wrap gap-2">
+                      {data.sizes_available.map(sz => (
                         <span
                           key={sz}
                           className="text-sm font-medium px-3 py-1.5 rounded-lg border border-[var(--color-gold)]/50 bg-[var(--color-gold)]/10 text-[var(--color-gold-dark)]"
                         >
                           {sz}
                         </span>
-                      ))
-                    )}
+                      ))}
+                    </div>
                   </div>
-                ) : (
+                )
+              ) : (
+                <div>
+                  <dt className="text-[var(--color-ink)]/50 text-xs uppercase tracking-wide mb-2">Available Sizes</dt>
                   <p className="text-sm text-[var(--color-ink)]/40">Currently out of stock</p>
-                )}
-              </div>
+                </div>
+              )}
+
+              {images.length > 1 && (
+                <div>
+                  <dt className="text-[var(--color-ink)]/50 text-xs uppercase tracking-wide mb-2">Photos</dt>
+                  <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar">
+                    {images.map((img, i) => (
+                      <button
+                        key={img.drive_file_id}
+                        onClick={() => setActiveIdx(i)}
+                        className={`shrink-0 w-14 aspect-[3/4] rounded-lg overflow-hidden border-2 bg-white transition-colors ${
+                          i === activeIdx ? 'border-[var(--color-gold)]' : 'border-transparent hover:border-[var(--color-line)]'
+                        }`}
+                      >
+                        <img
+                          src={imageUrl(img.drive_file_id, 'w600')}
+                          alt={`${data.style_id} ${i + 1}`}
+                          draggable={false}
+                          className="w-full h-full object-contain"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
