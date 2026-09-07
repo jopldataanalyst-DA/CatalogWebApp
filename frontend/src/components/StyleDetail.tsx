@@ -250,10 +250,12 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
                     <dt className="text-[var(--color-gold-dark)] text-xs uppercase tracking-wide font-semibold mb-3">
                       Price by Size
                     </dt>
-                    <div className="divide-y divide-[var(--color-gold)]/20">
+                    <div className="divide-y divide-[var(--color-ink)]/15">
                       {groupSizesByPrice(data.size_prices).map(({ sizes, price }) => (
-                        <div key={sizes.join('-')} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
-                          <span className="text-sm font-semibold tracking-wide">{sizes.join('  ')}</span>
+                        <div key={sizes.join('-')} className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0">
+                          <span className="flex flex-wrap gap-x-3 text-sm font-semibold">
+                            {sizes.map(sz => <span key={sz}>{sz}</span>)}
+                          </span>
                           <span className="text-sm text-[var(--color-ink)]/60 shrink-0">
                             {price != null ? `₹${price.toLocaleString('en-IN')}` : '—'}
                           </span>
