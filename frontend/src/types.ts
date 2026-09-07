@@ -21,12 +21,20 @@ export interface CatalogImage {
   filename: string
 }
 
+export interface SizePrice {
+  size: string
+  price: number | null
+}
+
 export interface StyleDetail {
   style_id: string
   fabric: string
   category: string
   price: number | null
   sizes_available: string[]
+  // Only non-empty when this style's sizes are genuinely priced
+  // differently from each other - otherwise show the flat `price` above.
+  size_prices: SizePrice[]
   images: CatalogImage[]
   tier?: string
 }

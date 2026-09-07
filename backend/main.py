@@ -67,6 +67,14 @@ _ITEM_MASTER_CATEGORY_CTE = """
 # picks any one of them per style; a style with no synced remark yet (never
 # run through that tab, or genuinely has none) simply won't appear in a
 # tier-based homepage section - not an error, just unclassified.
+_SKU_PRICE_AVG_CTE = """
+    sku_price_avg AS (
+        SELECT style_id, AVG(price) AS avg_price
+        FROM b2b_catalog_sku_prices
+        GROUP BY style_id
+    )
+"""
+
 _STYLE_TIER_CTE = """
     style_tier AS (
         SELECT DISTINCT ON (im."Style ID / Parent SKU")
@@ -132,10 +140,10 @@ async def list_catalog(
         where.append("cat.fabric = ANY(%s)")
         params.append(fabrics)
     if price_min is not None:
-        where.append("cat.price >= %s")
+        where.append("cat.effective_price >= %s")
         params.append(price_min)
     if price_max is not None:
-        where.append("cat.price <= %s")
+        where.append("cat.effective_price <= %s")
         params.append(price_max)
     if collection == "best_sellers":
         where.append("cat.tier = ANY(%s)")
@@ -166,16 +174,18 @@ async def list_catalog(
         f"""
         WITH {_ITEM_MASTER_CATEGORY_CTE},
         {_STYLE_TIER_CTE},
+        {_SKU_PRICE_AVG_CTE},
         cat_all AS (
-            SELECT b.*, imc.category, st.tier
+            SELECT b.*, imc.category, st.tier, COALESCE(spa.avg_price, b.price) AS effective_price
             FROM b2b_catalog b
             LEFT JOIN im_category imc ON imc.style_id = b.style_id
             LEFT JOIN style_tier st ON st.style_id = b.style_id
+            LEFT JOIN sku_price_avg spa ON spa.style_id = b.style_id
         ),
         cat AS (SELECT * FROM cat_all AS cat {where_sql}),
         {_SKU_STOCK_CTE}
         SELECT
-            cat.style_id, cat.fabric, cat.category, cat.price, cat.tier,
+            cat.style_id, cat.fabric, cat.category, cat.effective_price AS price, cat.tier,
             array_remove(array_agg(DISTINCT sku_stock.size) FILTER (WHERE sku_stock.qty - 2 > 0), NULL) AS sizes_available,
             (
                 SELECT ic.drive_file_id FROM b2b_catalog_images bci
@@ -186,7 +196,7 @@ async def list_catalog(
             (SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) AS image_count
         FROM cat
         LEFT JOIN sku_stock ON UPPER(TRIM(sku_stock.style_id)) = UPPER(TRIM(cat.style_id))
-        GROUP BY cat.style_id, cat.fabric, cat.category, cat.price, cat.tier
+        GROUP BY cat.style_id, cat.fabric, cat.category, cat.effective_price, cat.tier
         {having_sql}
         ORDER BY cat.style_id ASC
         """,
@@ -200,7 +210,7 @@ async def list_catalog(
                 "fabric": r.get("fabric") or "Cotton",
                 "category": r.get("category") or "Unknown",
                 "price": float(r["price"]) if r.get("price") is not None else None,
-                "sizes_available": sorted(r.get("sizes_available") or []),
+                "sizes_available": sorted(r.get("sizes_available") or [], key=_size_sort_key),
                 "image_count": r.get("image_count") or 0,
                 "cover_image_id": r.get("thumb_file_id"),
                 "tier": "New" if collection == "new_arrivals" else _badge_for_tier(r.get("tier")),
@@ -244,14 +254,16 @@ async def home_sections(per_section: int = Query(12, ge=1, le=30)):
         f"""
         WITH {_ITEM_MASTER_CATEGORY_CTE},
         {_STYLE_TIER_CTE},
+        {_SKU_PRICE_AVG_CTE},
         recent AS (
             SELECT style_id FROM b2b_catalog WHERE is_active = TRUE ORDER BY added_at DESC LIMIT {_NEW_ARRIVALS_LIMIT}
         ),
         cat AS (
-            SELECT b.*, imc.category, st.tier
+            SELECT b.*, imc.category, st.tier, COALESCE(spa.avg_price, b.price) AS effective_price
             FROM b2b_catalog b
             LEFT JOIN im_category imc ON imc.style_id = b.style_id
             LEFT JOIN style_tier st ON st.style_id = b.style_id
+            LEFT JOIN sku_price_avg spa ON spa.style_id = b.style_id
             WHERE b.is_active = TRUE
               AND (
                 st.tier IN ('Diamond A', 'Diamond B', 'Diamond C', 'Platinum A', 'Platinum B', 'Platinum C')
@@ -260,7 +272,7 @@ async def home_sections(per_section: int = Query(12, ge=1, le=30)):
         ),
         {_SKU_STOCK_CTE}
         SELECT
-            cat.style_id, cat.fabric, cat.category, cat.price, cat.tier, cat.added_at,
+            cat.style_id, cat.fabric, cat.category, cat.effective_price AS price, cat.tier, cat.added_at,
             array_remove(array_agg(DISTINCT sku_stock.size) FILTER (WHERE sku_stock.qty - 2 > 0), NULL) AS sizes_available,
             (
                 SELECT ic.drive_file_id FROM b2b_catalog_images bci
@@ -271,7 +283,7 @@ async def home_sections(per_section: int = Query(12, ge=1, le=30)):
             (SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) AS image_count
         FROM cat
         LEFT JOIN sku_stock ON UPPER(TRIM(sku_stock.style_id)) = UPPER(TRIM(cat.style_id))
-        GROUP BY cat.style_id, cat.fabric, cat.category, cat.price, cat.tier, cat.added_at
+        GROUP BY cat.style_id, cat.fabric, cat.category, cat.effective_price, cat.tier, cat.added_at
         HAVING (SELECT COUNT(*) FROM b2b_catalog_images bci WHERE bci.style_id = cat.style_id) > 0
         ORDER BY cat.style_id ASC
         """
@@ -283,7 +295,7 @@ async def home_sections(per_section: int = Query(12, ge=1, le=30)):
             "fabric": r.get("fabric") or "Cotton",
             "category": r.get("category") or "Unknown",
             "price": float(r["price"]) if r.get("price") is not None else None,
-            "sizes_available": sorted(r.get("sizes_available") or []),
+            "sizes_available": sorted(r.get("sizes_available") or [], key=_size_sort_key),
             "image_count": r.get("image_count") or 0,
             "cover_image_id": r.get("thumb_file_id"),
             "tier": badge,
@@ -390,12 +402,14 @@ async def get_style(style_id: str):
     cat_row = fetch_one(
         f"""
         WITH {_ITEM_MASTER_CATEGORY_CTE},
-        {_STYLE_TIER_CTE}
-        SELECT b.style_id, b.fabric, b.price, imc.category, st.tier,
+        {_STYLE_TIER_CTE},
+        {_SKU_PRICE_AVG_CTE}
+        SELECT b.style_id, b.fabric, COALESCE(spa.avg_price, b.price) AS price, imc.category, st.tier,
                b.style_id IN (SELECT style_id FROM b2b_catalog WHERE is_active = TRUE ORDER BY added_at DESC LIMIT {_NEW_ARRIVALS_LIMIT}) AS is_new_arrival
         FROM b2b_catalog b
         LEFT JOIN im_category imc ON imc.style_id = b.style_id
         LEFT JOIN style_tier st ON st.style_id = b.style_id
+        LEFT JOIN sku_price_avg spa ON spa.style_id = b.style_id
         WHERE b.style_id = %s AND b.is_active = TRUE
         """,
         (style_id,),
@@ -412,7 +426,38 @@ async def get_style(style_id: str):
         """,
         (style_id,),
     )
-    sizes_available = sorted({r["size"] for r in size_rows if r.get("size") and (r.get("qty") or 0) - 2 > 0})
+    sizes_available = sorted(
+        {r["size"] for r in size_rows if r.get("size") and (r.get("qty") or 0) - 2 > 0},
+        key=_size_sort_key,
+    )
+
+    # Per-size pricing: different sizes of the same style can be priced
+    # differently (set per Master SKU in PricingManagementSystem's B2B
+    # Catalog admin tab). Only sizes actually in stock are worth pricing
+    # here - matches sizes_available above, and a size with no per-SKU
+    # price set falls back to the style's overall (averaged) price so the
+    # UI never has to show a blank.
+    size_price_rows = fetch_all(
+        """
+        SELECT im."Size" AS size, p.price
+        FROM item_master im
+        LEFT JOIN b2b_catalog_sku_prices p
+            ON UPPER(TRIM(p.master_sku)) = UPPER(TRIM(im."Master SKU")) AND p.style_id = %s
+        WHERE im."Style ID / Parent SKU" = %s
+            AND im."Master SKU" IS NOT NULL AND im."Master SKU" != ''
+        """,
+        (style_id, style_id),
+    )
+    price_by_size = {r["size"]: float(r["price"]) for r in size_price_rows if r.get("size") and r.get("price") is not None}
+    fallback_price = float(cat_row["price"]) if cat_row.get("price") is not None else None
+    size_prices = [
+        {"size": sz, "price": price_by_size.get(sz, fallback_price)}
+        for sz in sizes_available
+    ]
+    # Sizes only need their own price shown when they actually differ from
+    # each other (or from the overall price) - otherwise a flat "Price"
+    # line is clearer than repeating the same number under every chip.
+    has_varying_prices = len({p["price"] for p in size_prices if p["price"] is not None}) > 1
 
     image_rows = fetch_all(
         """
@@ -433,8 +478,9 @@ async def get_style(style_id: str):
         "style_id": cat_row["style_id"],
         "fabric": cat_row.get("fabric") or "Cotton",
         "category": cat_row.get("category") or "Unknown",
-        "price": float(cat_row["price"]) if cat_row.get("price") is not None else None,
+        "price": fallback_price,
         "sizes_available": sizes_available,
+        "size_prices": size_prices if has_varying_prices else [],
         "images": images,
         "tier": badge,
     }
@@ -511,3 +557,11 @@ async def spa_catchall(request: Request, full_path: str):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         return response
     return HTMLResponse(content="<h1>Frontend build not found. Run: npm run build</h1>", status_code=503)
+
+
+if __name__ == "__main__":
+    # Lets this file be run directly (e.g. VS Code's "Run Python File in
+    # Dedicated Terminal") instead of only via `uvicorn main:app`.
+    import uvicorn
+
+    uvicorn.run("main:app", host="127.0.0.1", port=8010, reload=True)

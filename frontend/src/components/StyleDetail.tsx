@@ -17,7 +17,20 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
     let cancelled = false
     setLoading(true)
     fetchStyle(styleId)
-      .then(d => { if (!cancelled) { setData(d); setActiveIdx(0) } })
+      .then(d => {
+        if (cancelled) return
+        setData(d)
+        setActiveIdx(0)
+        // Kick off every image's fetch in parallel as soon as we know the
+        // full list, instead of only the active slide - the backend's
+        // image-proxy already sets a 24h Cache-Control, so by the time the
+        // browser has finished these requests, every slide the viewer
+        // clicks to next is already sitting in the HTTP cache (a repeat
+        // <img src> for the same URL resolves instantly, no re-fetch).
+        // Nothing is done with the Image objects beyond starting the
+        // fetch, so they're safe to fire-and-forget.
+        d.images.forEach(img => { new Image().src = imageUrl(img.drive_file_id, 'w1200') })
+      })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [styleId])
@@ -166,8 +179,22 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
                   <dd className="font-medium">{data.fabric}</dd>
                 </div>
                 <div>
-                  <dt className="text-[var(--color-ink)]/50 text-xs uppercase tracking-wide mb-1">Price</dt>
-                  <dd className="font-medium">{data.price != null ? `₹${data.price.toLocaleString('en-IN')}` : 'On request'}</dd>
+                  <dt className="text-[var(--color-ink)]/50 text-xs uppercase tracking-wide mb-1">
+                    {data.size_prices.length > 0 ? 'Price Range' : 'Price'}
+                  </dt>
+                  <dd className="font-medium">
+                    {data.size_prices.length > 0 ? (
+                      <>
+                        ₹{Math.min(...data.size_prices.map(p => p.price ?? Infinity)).toLocaleString('en-IN')}
+                        {' – '}
+                        ₹{Math.max(...data.size_prices.map(p => p.price ?? -Infinity)).toLocaleString('en-IN')}
+                      </>
+                    ) : data.price != null ? (
+                      `₹${data.price.toLocaleString('en-IN')}`
+                    ) : (
+                      'On request'
+                    )}
+                  </dd>
                 </div>
               </dl>
 
@@ -175,14 +202,31 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
                 <dt className="text-[var(--color-ink)]/50 text-xs uppercase tracking-wide mb-2">Available Sizes</dt>
                 {data.sizes_available.length > 0 ? (
                   <div className="flex flex-wrap gap-2">
-                    {data.sizes_available.map(sz => (
-                      <span
-                        key={sz}
-                        className="text-sm font-medium px-3 py-1.5 rounded-lg border border-[var(--color-gold)]/50 bg-[var(--color-gold)]/10 text-[var(--color-gold-dark)]"
-                      >
-                        {sz}
-                      </span>
-                    ))}
+                    {data.size_prices.length > 0 ? (
+                      // Prices genuinely differ by size - show each chip as
+                      // size-over-price so a buyer can tell at a glance
+                      // which sizes cost more, instead of one flat number.
+                      data.size_prices.map(({ size, price }) => (
+                        <div
+                          key={size}
+                          className="flex flex-col items-center px-3 py-1.5 rounded-lg border border-[var(--color-gold)]/50 bg-[var(--color-gold)]/10 text-[var(--color-gold-dark)] min-w-[3.5rem]"
+                        >
+                          <span className="text-sm font-medium">{size}</span>
+                          <span className="text-[11px] text-[var(--color-ink)]/50">
+                            {price != null ? `₹${price.toLocaleString('en-IN')}` : '—'}
+                          </span>
+                        </div>
+                      ))
+                    ) : (
+                      data.sizes_available.map(sz => (
+                        <span
+                          key={sz}
+                          className="text-sm font-medium px-3 py-1.5 rounded-lg border border-[var(--color-gold)]/50 bg-[var(--color-gold)]/10 text-[var(--color-gold-dark)]"
+                        >
+                          {sz}
+                        </span>
+                      ))
+                    )}
                   </div>
                 ) : (
                   <p className="text-sm text-[var(--color-ink)]/40">Currently out of stock</p>
