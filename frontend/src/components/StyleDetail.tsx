@@ -136,9 +136,21 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-0 sm:p-6"
+      onClick={onClose}
+    >
       <div
-        className="bg-[var(--color-paper)] w-full max-w-4xl max-h-[92vh] rounded-2xl overflow-hidden shadow-2xl grid grid-cols-1 md:grid-cols-2"
+        // dvh (dynamic viewport height), not vh - on mobile, vh is based on
+        // the largest possible viewport (browser chrome hidden), so a
+        // max-height in vh can end up taller than what's actually visible
+        // while the URL bar/toolbar is showing, pushing the modal's top
+        // (the image, with its style-code badge) off the top of the
+        // screen. dvh tracks the real visible viewport. The outer wrapper
+        // above also now scrolls and starts from the top on mobile instead
+        // of center-clipping, as a fallback for any phone/zoom level where
+        // the modal is still taller than the visible screen.
+        className="bg-[var(--color-paper)] w-full max-w-4xl sm:max-h-[92dvh] rounded-none sm:rounded-2xl overflow-hidden shadow-2xl grid grid-cols-1 md:grid-cols-2 my-0 sm:my-auto"
         onClick={e => e.stopPropagation()}
       >
         <div
