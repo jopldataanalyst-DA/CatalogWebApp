@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, ChevronLeft, ChevronRight, ImageOff, Loader2 } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, ImageOff, Loader2, Expand } from 'lucide-react'
 import { fetchStyle, imageUrl } from '../api'
 import type { SizePrice, StyleDetail as StyleDetailType } from '../types'
 
@@ -28,6 +28,9 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
   const [dragging, setDragging] = useState(false)
   const trackRef = useRef<HTMLDivElement>(null)
   const [trackWidth, setTrackWidth] = useState(0)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
+  const lightboxTrackRef = useRef<HTMLDivElement>(null)
+  const [lightboxTrackWidth, setLightboxTrackWidth] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -53,7 +56,7 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') { if (lightboxOpen) setLightboxOpen(false); else onClose() }
       if (e.key === 'ArrowLeft') setActiveIdx(i => (images.length ? (i - 1 + images.length) % images.length : i))
       if (e.key === 'ArrowRight') setActiveIdx(i => (images.length ? (i + 1) % images.length : i))
     }
@@ -61,7 +64,7 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
     document.body.style.overflow = 'hidden'
     return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = '' }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onClose])
+  }, [onClose, lightboxOpen])
 
   // Track the carousel's own pixel width so a drag's translateX can be
   // expressed as a percentage of it - keeps the drag 1:1 with the pointer
@@ -75,6 +78,18 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
     ro.observe(el)
     return () => ro.disconnect()
   }, [])
+
+  // Same idea as the main carousel's track above, but measured separately
+  // since the lightbox is a different (full-viewport) width - only mounted
+  // while open, so this only ever observes while it's actually visible.
+  useEffect(() => {
+    const el = lightboxTrackRef.current
+    if (!el) return
+    const ro = new ResizeObserver(entries => setLightboxTrackWidth(entries[0].contentRect.width))
+    setLightboxTrackWidth(el.clientWidth)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [lightboxOpen])
 
   const images = data?.images ?? []
 
@@ -110,6 +125,11 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
     transform: `translateX(calc(${-activeIdx * 100}% + ${dragPercent}%))`,
     transition: dragging ? 'none' : 'transform 380ms cubic-bezier(0.22, 1, 0.36, 1)',
   }
+  const lightboxDragPercent = lightboxTrackWidth > 0 ? (dragDeltaX / lightboxTrackWidth) * 100 : 0
+  const lightboxTrackStyle: React.CSSProperties = {
+    transform: `translateX(calc(${-activeIdx * 100}% + ${lightboxDragPercent}%))`,
+    transition: dragging ? 'none' : 'transform 380ms cubic-bezier(0.22, 1, 0.36, 1)',
+  }
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6" onClick={onClose}>
@@ -131,30 +151,51 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
             </div>
           ) : images.length > 0 ? (
             <>
+              {/* Always shows the whole photo, never cropped, on any
+                  screen/aspect ratio - a blurred, scaled-up copy of the
+                  same image fills any leftover space behind the real
+                  (object-contain, uncropped) image instead of plain
+                  letterbox bars, so it never looks like it's just "not
+                  fitting" the panel. */}
               <div ref={trackRef} className="flex w-full h-full" style={trackStyle}>
                 {images.map((img, i) => (
-                  <div key={img.drive_file_id} className="w-full h-full shrink-0 flex items-center justify-center">
+                  <div key={img.drive_file_id} className="relative w-full h-full shrink-0 overflow-hidden flex items-center justify-center">
+                    <img
+                      src={imageUrl(img.drive_file_id, 'w1200')}
+                      alt=""
+                      aria-hidden="true"
+                      draggable={false}
+                      className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-40 pointer-events-none"
+                    />
                     <img
                       src={imageUrl(img.drive_file_id, 'w1200')}
                       alt={data?.style_id}
                       draggable={false}
                       loading={Math.abs(i - activeIdx) <= 1 ? 'eager' : 'lazy'}
-                      className="w-full h-full object-contain pointer-events-none"
+                      className="relative w-full h-full object-contain pointer-events-none"
                     />
                   </div>
                 ))}
               </div>
+              <button
+                onClick={e => { e.stopPropagation(); setLightboxOpen(true) }}
+                className="absolute top-2 right-2 bg-black/10 hover:bg-black/20 text-white rounded-full p-1.5"
+                aria-label="View full screen"
+                title="View full screen"
+              >
+                <Expand size={14} />
+              </button>
               {images.length > 1 && (
                 <>
                   <button
-                    onClick={goPrev}
+                    onClick={e => { e.stopPropagation(); goPrev() }}
                     className="absolute left-2 top-1/2 -translate-y-1/2 bg-black/5 hover:bg-black/10 text-[var(--color-ink)] rounded-full p-1.5"
                     aria-label="Previous image"
                   >
                     <ChevronLeft size={18} />
                   </button>
                   <button
-                    onClick={goNext}
+                    onClick={e => { e.stopPropagation(); goNext() }}
                     className="absolute right-2 top-1/2 -translate-y-1/2 bg-black/5 hover:bg-black/10 text-[var(--color-ink)] rounded-full p-1.5"
                     aria-label="Next image"
                   >
@@ -164,7 +205,7 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
                     {images.map((_, i) => (
                       <button
                         key={i}
-                        onClick={() => setActiveIdx(i)}
+                        onClick={e => { e.stopPropagation(); setActiveIdx(i) }}
                         className={`w-1.5 h-1.5 rounded-full transition-all ${i === activeIdx ? 'bg-[var(--color-gold)] w-4' : 'bg-[var(--color-ink)]/20'}`}
                         aria-label={`Image ${i + 1}`}
                       />
@@ -344,6 +385,82 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
           )}
         </div>
       </div>
+
+      {lightboxOpen && images.length > 0 && (
+        <div
+          className="fixed inset-0 z-[70] bg-white flex flex-col"
+          onClick={e => { e.stopPropagation(); setLightboxOpen(false) }}
+        >
+          <button
+            onClick={e => { e.stopPropagation(); setLightboxOpen(false) }}
+            className="absolute top-4 right-4 z-10 text-[var(--color-ink)]/70 hover:text-[var(--color-ink)] bg-black/5 hover:bg-black/10 rounded-full p-2"
+            aria-label="Close full screen"
+          >
+            <X size={22} />
+          </button>
+          <div
+            className="flex-1 relative overflow-hidden touch-pan-y select-none"
+            style={{ cursor: images.length > 1 ? (dragging ? 'grabbing' : 'grab') : 'default' }}
+            onPointerDown={onPointerDown}
+            onPointerMove={onPointerMove}
+            onPointerUp={endDrag}
+            onPointerCancel={endDrag}
+            onClick={e => e.stopPropagation()}
+          >
+            <div ref={lightboxTrackRef} className="flex w-full h-full" style={lightboxTrackStyle}>
+              {images.map((img, i) => (
+                <div key={img.drive_file_id} className="w-full h-full shrink-0 flex items-center justify-center">
+                  <img
+                    src={imageUrl(img.drive_file_id, 'w1200')}
+                    alt={data?.style_id}
+                    draggable={false}
+                    loading={Math.abs(i - activeIdx) <= 1 ? 'eager' : 'lazy'}
+                    className="max-w-full max-h-full object-contain pointer-events-none"
+                  />
+                </div>
+              ))}
+            </div>
+            {images.length > 1 && (
+              <>
+                <button
+                  onClick={e => { e.stopPropagation(); goPrev() }}
+                  className="absolute left-2 sm:left-6 top-1/2 -translate-y-1/2 text-[var(--color-ink)]/70 hover:text-[var(--color-ink)] bg-black/5 hover:bg-black/10 rounded-full p-2"
+                  aria-label="Previous image"
+                >
+                  <ChevronLeft size={22} />
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); goNext() }}
+                  className="absolute right-2 sm:right-6 top-1/2 -translate-y-1/2 text-[var(--color-ink)]/70 hover:text-[var(--color-ink)] bg-black/5 hover:bg-black/10 rounded-full p-2"
+                  aria-label="Next image"
+                >
+                  <ChevronRight size={22} />
+                </button>
+              </>
+            )}
+          </div>
+          {images.length > 1 && (
+            <div className="shrink-0 flex justify-center gap-2 overflow-x-auto px-4 py-3 hide-scrollbar" onClick={e => e.stopPropagation()}>
+              {images.map((img, i) => (
+                <button
+                  key={img.drive_file_id}
+                  onClick={() => setActiveIdx(i)}
+                  className={`shrink-0 w-12 aspect-[3/4] rounded-md overflow-hidden border-2 transition-colors ${
+                    i === activeIdx ? 'border-[var(--color-gold)]' : 'border-transparent opacity-60 hover:opacity-100'
+                  }`}
+                >
+                  <img
+                    src={imageUrl(img.drive_file_id, 'w600')}
+                    alt={`${data?.style_id} ${i + 1}`}
+                    draggable={false}
+                    className="w-full h-full object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
