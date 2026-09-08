@@ -198,7 +198,13 @@ export function SearchPage() {
           onClose={() => {
             setOpenStyle(null)
             if (searchParams.get('style')) {
-              setSearchParams(prev => { const p = new URLSearchParams(prev); p.delete('style'); return p })
+              // replace, not push - StyleDetailModal already manages its
+              // own back-button history (pushState on open, history.back()
+              // on close); pushing another entry here on top of that would
+              // leave a stray forward-navigable entry with the modal closed
+              // but the URL still carrying ?style=, right after the user
+              // just went back.
+              setSearchParams(prev => { const p = new URLSearchParams(prev); p.delete('style'); return p }, { replace: true })
             }
           }}
         />

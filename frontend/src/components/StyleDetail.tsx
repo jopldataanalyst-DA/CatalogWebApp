@@ -31,6 +31,35 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
   const [lightboxOpen, setLightboxOpen] = useState(false)
   const lightboxTrackRef = useRef<HTMLDivElement>(null)
   const [lightboxTrackWidth, setLightboxTrackWidth] = useState(0)
+  const lightboxOpenRef = useRef(false)
+  const onCloseRef = useRef(onClose)
+  useEffect(() => { lightboxOpenRef.current = lightboxOpen }, [lightboxOpen])
+  useEffect(() => { onCloseRef.current = onClose })
+
+  // Makes the phone/browser back button close this modal one layer at a
+  // time (lightbox first, then the modal itself) instead of leaving the
+  // whole site, the way any other native-feeling overlay behaves. Opening
+  // this modal pushes one history entry; opening the lightbox on top of it
+  // pushes a second. Every close action in this component - the X buttons,
+  // clicking the backdrop, Escape - goes through `goBack` below instead of
+  // calling onClose/setLightboxOpen directly, so a UI close and a real
+  // back-button press are handled by the exact same code path and always
+  // leave history balanced (no orphaned entries either way).
+  useEffect(() => {
+    window.history.pushState({ styleDetailModal: true }, '')
+    const onPopState = () => {
+      if (lightboxOpenRef.current) setLightboxOpen(false)
+      else onCloseRef.current()
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  useEffect(() => {
+    if (lightboxOpen) window.history.pushState({ styleDetailLightbox: true }, '')
+  }, [lightboxOpen])
+
+  const goBack = () => window.history.back()
 
   useEffect(() => {
     let cancelled = false
@@ -56,15 +85,14 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { if (lightboxOpen) setLightboxOpen(false); else onClose() }
+      if (e.key === 'Escape') window.history.back()
       if (e.key === 'ArrowLeft') setActiveIdx(i => (images.length ? (i - 1 + images.length) % images.length : i))
       if (e.key === 'ArrowRight') setActiveIdx(i => (images.length ? (i + 1) % images.length : i))
     }
     document.addEventListener('keydown', onKey)
     document.body.style.overflow = 'hidden'
     return () => { document.removeEventListener('keydown', onKey); document.body.style.overflow = '' }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [onClose, lightboxOpen])
+  }, [])
 
   // Track the carousel's own pixel width so a drag's translateX can be
   // expressed as a percentage of it - keeps the drag 1:1 with the pointer
@@ -150,7 +178,7 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
   return (
     <div
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start sm:items-center justify-center overflow-y-auto p-0 sm:p-6"
-      onClick={onClose}
+      onClick={goBack}
     >
       <div
         // dvh (dynamic viewport height), not vh - on mobile, vh is based on
@@ -253,7 +281,7 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
 
         <div className="p-6 sm:p-8 overflow-y-auto hide-scrollbar relative">
           <button
-            onClick={onClose}
+            onClick={goBack}
             className="absolute top-4 right-4 text-[var(--color-ink)]/50 hover:text-[var(--color-ink)] rounded-full p-1.5 hover:bg-[var(--color-paper2)]"
             aria-label="Close"
           >
@@ -423,10 +451,10 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
       {lightboxOpen && images.length > 0 && (
         <div
           className="fixed inset-0 z-[70] bg-white flex flex-col"
-          onClick={e => { e.stopPropagation(); setLightboxOpen(false) }}
+          onClick={e => { e.stopPropagation(); goBack() }}
         >
           <button
-            onClick={e => { e.stopPropagation(); setLightboxOpen(false) }}
+            onClick={e => { e.stopPropagation(); goBack() }}
             className="absolute top-4 right-4 z-10 text-[var(--color-ink)]/70 hover:text-[var(--color-ink)] bg-black/5 hover:bg-black/10 rounded-full p-2"
             aria-label="Close full screen"
           >
