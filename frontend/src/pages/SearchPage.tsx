@@ -32,7 +32,7 @@ export function SearchPage() {
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounced(search, 300)
   const [loading, setLoading] = useState(true)
-  const [openStyle, setOpenStyle] = useState<string | null>(null)
+  const [openStyle, setOpenStyle] = useState<string | null>(searchParams.get('style'))
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
@@ -192,7 +192,17 @@ export function SearchPage() {
         </main>
       </div>
 
-      {openStyle && <StyleDetailModal styleId={openStyle} onClose={() => setOpenStyle(null)} />}
+      {openStyle && (
+        <StyleDetailModal
+          styleId={openStyle}
+          onClose={() => {
+            setOpenStyle(null)
+            if (searchParams.get('style')) {
+              setSearchParams(prev => { const p = new URLSearchParams(prev); p.delete('style'); return p })
+            }
+          }}
+        />
+      )}
     </>
   )
 }
