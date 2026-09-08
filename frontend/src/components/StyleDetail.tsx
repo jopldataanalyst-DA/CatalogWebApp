@@ -147,6 +147,148 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
     setDragDeltaX(0)
   }
 
+  // ---- Full-screen gallery pinch/double-tap zoom + pan ----
+  // Scoped entirely to the lightbox: pinch with two fingers, double-tap to
+  // toggle zoom, and (while zoomed) drag with one finger to pan instead of
+  // swiping to the next slide. Reset whenever the slide changes or the
+  // gallery closes, so you never land on a new/reopened image pre-zoomed.
+  const MIN_ZOOM = 1
+  const MAX_ZOOM = 4
+  const DOUBLE_TAP_ZOOM = 2.5
+  const [zoomScale, setZoomScale] = useState(1)
+  const [panX, setPanX] = useState(0)
+  const [panY, setPanY] = useState(0)
+  const zoomStateRef = useRef({ scale: 1, panX: 0, panY: 0 })
+  useEffect(() => { zoomStateRef.current = { scale: zoomScale, panX, panY } }, [zoomScale, panX, panY])
+  useEffect(() => { setZoomScale(1); setPanX(0); setPanY(0) }, [activeIdx, lightboxOpen])
+
+  const lbPointers = useRef(new Map<number, { x: number; y: number }>())
+  const lbPinch = useRef<{ dist: number; scale: number; midX: number; midY: number } | null>(null)
+  const lbPan = useRef<{ startX: number; startY: number; panX: number; panY: number } | null>(null)
+  const lbLastTap = useRef<{ time: number; x: number; y: number } | null>(null)
+  const lbTapCandidate = useRef<{ x: number; y: number; time: number; pointerId: number } | null>(null)
+
+  const clampPan = (scale: number, x: number, y: number) => {
+    const el = lightboxTrackRef.current
+    const boundX = el ? (el.clientWidth * (scale - 1)) / 2 : 0
+    const boundY = el ? (el.clientHeight * (scale - 1)) / 2 : 0
+    return {
+      x: Math.max(-boundX, Math.min(boundX, x)),
+      y: Math.max(-boundY, Math.min(boundY, y)),
+    }
+  }
+
+  // Zooms in/out anchored at a specific screen point (pinch midpoint or a
+  // double-tap) so that point stays visually put instead of the image
+  // jumping to re-center on every zoom change.
+  const zoomAt = (screenX: number, screenY: number, fromScale: number, fromPanX: number, fromPanY: number, toScale: number) => {
+    const el = lightboxTrackRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const midX = screenX - (rect.left + rect.width / 2)
+    const midY = screenY - (rect.top + rect.height / 2)
+    const ratio = toScale / fromScale
+    const nextPanX = midX - (midX - fromPanX) * ratio
+    const nextPanY = midY - (midY - fromPanY) * ratio
+    const clamped = clampPan(toScale, nextPanX, nextPanY)
+    setZoomScale(toScale)
+    setPanX(clamped.x)
+    setPanY(clamped.y)
+  }
+
+  const lbOnPointerDown = (e: React.PointerEvent) => {
+    try { (e.target as HTMLElement).setPointerCapture(e.pointerId) } catch { /* noop */ }
+    lbPointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    if (lbPointers.current.size === 2) {
+      // Second finger down - a swipe or single-finger pan already in
+      // progress is now a pinch instead.
+      dragStartX.current = null
+      setDragging(false)
+      setDragDeltaX(0)
+      lbPan.current = null
+      const pts = Array.from(lbPointers.current.values())
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+      lbPinch.current = {
+        dist,
+        scale: zoomStateRef.current.scale,
+        midX: (pts[0].x + pts[1].x) / 2,
+        midY: (pts[0].y + pts[1].y) / 2,
+      }
+      return
+    }
+
+    lbTapCandidate.current = { x: e.clientX, y: e.clientY, time: Date.now(), pointerId: e.pointerId }
+
+    if (zoomStateRef.current.scale > 1.01) {
+      lbPan.current = { startX: e.clientX, startY: e.clientY, panX: zoomStateRef.current.panX, panY: zoomStateRef.current.panY }
+    } else {
+      onPointerDown(e)
+    }
+  }
+
+  const lbOnPointerMove = (e: React.PointerEvent) => {
+    if (!lbPointers.current.has(e.pointerId)) return
+    lbPointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+
+    if (lbPointers.current.size === 2 && lbPinch.current) {
+      const pts = Array.from(lbPointers.current.values())
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y)
+      const nextScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, lbPinch.current.scale * (dist / lbPinch.current.dist)))
+      zoomAt(lbPinch.current.midX, lbPinch.current.midY, lbPinch.current.scale, zoomStateRef.current.panX, zoomStateRef.current.panY, nextScale)
+      return
+    }
+
+    if (lbPan.current) {
+      const dx = e.clientX - lbPan.current.startX
+      const dy = e.clientY - lbPan.current.startY
+      const clamped = clampPan(zoomStateRef.current.scale, lbPan.current.panX + dx, lbPan.current.panY + dy)
+      setPanX(clamped.x)
+      setPanY(clamped.y)
+      return
+    }
+
+    // A single finger having moved far enough rules out a tap, whether or
+    // not it ends up passing the swipe threshold too.
+    if (lbTapCandidate.current && Math.hypot(e.clientX - lbTapCandidate.current.x, e.clientY - lbTapCandidate.current.y) > 10) {
+      lbTapCandidate.current = null
+    }
+    onPointerMove(e)
+  }
+
+  const lbOnPointerUp = (e: React.PointerEvent) => {
+    lbPointers.current.delete(e.pointerId)
+
+    if (lbPointers.current.size < 2) lbPinch.current = null
+    if (lbPointers.current.size === 0) {
+      lbPan.current = null
+      // Snap fully back to identity once released - a pinch that ends up
+      // barely above 1x reads as a mis-tap, not an intentional small zoom.
+      if (zoomStateRef.current.scale < 1.05) { setZoomScale(1); setPanX(0); setPanY(0) }
+    }
+
+    const tap = lbTapCandidate.current
+    lbTapCandidate.current = null
+    if (tap && tap.pointerId === e.pointerId && Date.now() - tap.time < 300) {
+      const last = lbLastTap.current
+      lbLastTap.current = { time: Date.now(), x: e.clientX, y: e.clientY }
+      if (last && Date.now() - last.time < 350 && Math.hypot(e.clientX - last.x, e.clientY - last.y) < 40) {
+        lbLastTap.current = null
+        const current = zoomStateRef.current
+        if (current.scale > 1.01) zoomAt(e.clientX, e.clientY, current.scale, current.panX, current.panY, 1)
+        else zoomAt(e.clientX, e.clientY, 1, 0, 0, DOUBLE_TAP_ZOOM)
+        return
+      }
+    }
+
+    if (!lbPan.current) endDrag()
+  }
+
+  const lbImageStyle = (i: number): React.CSSProperties =>
+    i === activeIdx
+      ? { transform: `translate(${panX}px, ${panY}px) scale(${zoomScale})`, transition: (lbPan.current || lbPinch.current) ? 'none' : 'transform 200ms ease-out' }
+      : {}
+
   // Mobile-only tap-to-open: desktop keeps the dedicated expand button as
   // the sole way in (a plain click there is more likely to be someone just
   // browsing), but on mobile - where the Photos thumbnail strip is now
@@ -470,22 +612,23 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
             // scrolling before JS saw enough movement to call it - fully
             // disabling native touch handling here removes that race.
             className="flex-1 relative overflow-hidden touch-none select-none"
-            style={{ cursor: images.length > 1 ? (dragging ? 'grabbing' : 'grab') : 'default' }}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={endDrag}
-            onPointerCancel={endDrag}
+            style={{ cursor: zoomScale > 1 ? 'grab' : images.length > 1 ? (dragging ? 'grabbing' : 'grab') : 'default' }}
+            onPointerDown={lbOnPointerDown}
+            onPointerMove={lbOnPointerMove}
+            onPointerUp={lbOnPointerUp}
+            onPointerCancel={lbOnPointerUp}
             onClick={e => e.stopPropagation()}
           >
             <div ref={lightboxTrackRef} className="flex w-full h-full" style={lightboxTrackStyle}>
               {images.map((img, i) => (
-                <div key={img.drive_file_id} className="w-full h-full shrink-0 flex items-center justify-center">
+                <div key={img.drive_file_id} className="w-full h-full shrink-0 flex items-center justify-center overflow-hidden">
                   <img
                     src={imageUrl(img.drive_file_id, 'w1200')}
                     alt={data?.style_id}
                     draggable={false}
                     loading={Math.abs(i - activeIdx) <= 1 ? 'eager' : 'lazy'}
                     className="max-w-full max-h-full object-contain pointer-events-none"
+                    style={lbImageStyle(i)}
                   />
                 </div>
               ))}
