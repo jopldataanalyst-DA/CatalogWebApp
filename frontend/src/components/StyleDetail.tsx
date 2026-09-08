@@ -119,6 +119,18 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
     setDragDeltaX(0)
   }
 
+  // Mobile-only tap-to-open: desktop keeps the dedicated expand button as
+  // the sole way in (a plain click there is more likely to be someone just
+  // browsing), but on mobile - where the Photos thumbnail strip is now
+  // hidden - tapping the image is the natural way to reach the full-screen
+  // gallery. Matches the md breakpoint the image panel itself switches on
+  // (aspect-square below it, md:aspect-auto at/above). Gated on drag
+  // distance so a real swipe-to-next-slide never also opens the gallery.
+  const onImageAreaClick = () => {
+    if (images.length === 0 || Math.abs(dragDeltaX) > 5) return
+    if (window.innerWidth < 768) setLightboxOpen(true)
+  }
+
   // Percentage-based slide offset (like Amazon/Flipkart's PDP gallery) -
   // a flex track holding every image side by side, shifted by -100% per
   // slide plus however far the pointer has dragged, animated with a
@@ -159,6 +171,7 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
           onPointerMove={onPointerMove}
           onPointerUp={endDrag}
           onPointerCancel={endDrag}
+          onClick={onImageAreaClick}
           style={{ cursor: images.length > 1 ? (dragging ? 'grabbing' : 'grab') : 'default' }}
         >
           {loading ? (
@@ -375,7 +388,12 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
               )}
 
               {images.length > 1 && (
-                <div>
+                // Hidden on mobile - the dot indicators + swipe already
+                // cover browsing images there, and this strip's own space
+                // is better spent letting the full-screen gallery (tap the
+                // image, or the expand button) be the one place with a
+                // thumbnail strip on small screens.
+                <div className="hidden md:block">
                   <dt className="text-[var(--color-ink)]/50 text-xs uppercase tracking-wide mb-2">Photos</dt>
                   <div className="flex gap-2 overflow-x-auto pb-1 hide-scrollbar">
                     {images.map((img, i) => (
