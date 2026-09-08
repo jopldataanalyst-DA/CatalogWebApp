@@ -100,7 +100,11 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
     if (images.length < 2) return
     dragStartX.current = e.clientX
     setDragging(true)
-    ;(e.target as HTMLElement).setPointerCapture(e.pointerId)
+    // Some mobile WebKit versions throw here for touch-derived pointer
+    // events in certain states - never let that abort the drag, since
+    // capture is just an optimization (keeps move events coming even if
+    // the finger leaves the element's bounds), not a requirement.
+    try { (e.target as HTMLElement).setPointerCapture(e.pointerId) } catch { /* noop */ }
   }
   const onPointerMove = (e: React.PointerEvent) => {
     if (dragStartX.current == null) return
@@ -399,7 +403,15 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
             <X size={22} />
           </button>
           <div
-            className="flex-1 relative overflow-hidden touch-pan-y select-none"
+            // touch-none (not touch-pan-y like the main carousel) - this
+            // pane has nothing to vertically scroll, so the browser should
+            // never contest the gesture for native scrolling before our
+            // pointer handlers get to decide it's a horizontal swipe. On at
+            // least some mobile browsers, pan-y still let the OS "claim"
+            // an ambiguous touch (e.g. a slightly diagonal swipe) for
+            // scrolling before JS saw enough movement to call it - fully
+            // disabling native touch handling here removes that race.
+            className="flex-1 relative overflow-hidden touch-none select-none"
             style={{ cursor: images.length > 1 ? (dragging ? 'grabbing' : 'grab') : 'default' }}
             onPointerDown={onPointerDown}
             onPointerMove={onPointerMove}
