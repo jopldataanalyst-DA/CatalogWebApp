@@ -582,7 +582,11 @@ def _og_preview_html(request: Request, style_id: str, category: str, price_text:
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
     base = f"{scheme}://{host}"
     page_url = f"{base}/search?style={style_id}"
-    image_url = f"{base}/api/image-proxy?id={image_id}&sz=w1200" if image_id else f"{base}/hero-banner.jpg"
+    # w1200 came out ~600KB for these product photos - comfortably over
+    # WhatsApp's (and most link-preview bots') informal size budget for a
+    # preview thumbnail, which silently drops the image rather than erroring.
+    # w600 is ~50KB and still well above the ~300x300 minimum these bots want.
+    image_url = f"{base}/api/image-proxy?id={image_id}&sz=w600" if image_id else f"{base}/hero-banner.jpg"
     title = f"{style_id} - Rajnandini Fashion"
     description = f"{category} · {price_text}"
 
