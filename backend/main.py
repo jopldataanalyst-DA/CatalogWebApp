@@ -557,10 +557,91 @@ if (_static_dir / "assets").exists():
     app.mount("/assets", StaticFiles(directory=str(_static_dir / "assets")), name="assets")
 
 
+# Link-preview crawlers (WhatsApp, Telegram, iMessage, Facebook, Slack...)
+# never run the SPA's JavaScript, so a client-side <title>/meta update after
+# fetchStyle() resolves is invisible to them - they only ever see whatever
+# static HTML this server hands back for the URL. Detecting these specific
+# user agents and serving a tiny real HTML page with the actual product
+# photo/price baked into <meta property="og:*"> tags is the only way a
+# shared product link renders with an image preview instead of a bare link.
+_LINK_PREVIEW_BOT_RE = re.compile(
+    r"whatsapp|facebookexternalhit|telegrambot|slackbot|twitterbot|linkedinbot|"
+    r"discordbot|skypeuripreview|pinterest|vkshare|redditbot|line-poker",
+    re.IGNORECASE,
+)
+
+
+def _og_preview_html(
+    request: Request, style_id: str, category: str, b2b_category: Optional[str], price_text: str, image_id: Optional[str]
+) -> str:
+    base = str(request.base_url).rstrip("/")
+    page_url = f"{base}/search?style={style_id}"
+    image_url = f"{base}/api/image-proxy?id={image_id}&sz=w1200" if image_id else f"{base}/hero-banner.jpg"
+    title = f"{style_id} - Rajnandini Fashion"
+    # b2b_category is often the same word as category (e.g. both "Cord
+    # Set"), but sometimes a per-style override gives it a more specific
+    # buyer-facing label (see b2b_catalog_style_fit) - only worth the extra
+    # segment in the description when it actually differs.
+    category_part = category if not b2b_category or b2b_category == category else f"{category} ({b2b_category})"
+    description = f"{category_part} · {price_text}"
+
+    def esc(s: str) -> str:
+        return s.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
+
+    return f"""<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{esc(title)}</title>
+<meta property="og:type" content="product">
+<meta property="og:title" content="{esc(title)}">
+<meta property="og:description" content="{esc(description)}">
+<meta property="og:image" content="{esc(image_url)}">
+<meta property="og:url" content="{esc(page_url)}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{esc(title)}">
+<meta name="twitter:description" content="{esc(description)}">
+<meta name="twitter:image" content="{esc(image_url)}">
+</head>
+<body></body>
+</html>"""
+
+
 @app.get("/{full_path:path}", include_in_schema=False)
 async def spa_catchall(request: Request, full_path: str):
     if full_path.startswith("api/"):
         return HTMLResponse(content='{"detail":"Not Found"}', status_code=404, media_type="application/json")
+
+    style_id = request.query_params.get("style")
+    if full_path == "search" and style_id and _LINK_PREVIEW_BOT_RE.search(request.headers.get("user-agent", "")):
+        row = fetch_one(
+            f"""
+            WITH {_ITEM_MASTER_CATEGORY_CTE},
+            {_SKU_PRICE_AVG_CTE}
+            SELECT b.style_id, imc.category, COALESCE(spa.avg_price, b.price) AS price,
+                   COALESCE(fit.b2b_category, clm.b2b_category) AS b2b_category,
+                   (
+                       SELECT ic.drive_file_id FROM b2b_catalog_images bci
+                       JOIN image_collection ic ON ic.id = bci.image_id
+                       WHERE bci.style_id = b.style_id
+                       ORDER BY bci.position, bci.id LIMIT 1
+                   ) AS thumb_file_id
+            FROM b2b_catalog b
+            LEFT JOIN im_category imc ON imc.style_id = b.style_id
+            LEFT JOIN sku_price_avg spa ON spa.style_id = b.style_id
+            LEFT JOIN category_length_map clm ON clm.category = imc.category
+            LEFT JOIN b2b_catalog_style_fit fit ON fit.style_id = b.style_id
+            WHERE b.style_id = %s AND b.is_active = TRUE
+            """,
+            (style_id,),
+        )
+        if row:
+            price_text = f"₹{row['price']:,.0f}" if row.get("price") is not None else "Price on request"
+            html = _og_preview_html(
+                request, row["style_id"], row.get("category") or "", row.get("b2b_category"), price_text, row.get("thumb_file_id")
+            )
+            return HTMLResponse(content=html)
+
     # Public root files copied verbatim from frontend/public/ (favicon.svg
     # etc.) - not under /assets, so they need this direct check before
     # falling through to the SPA shell.
