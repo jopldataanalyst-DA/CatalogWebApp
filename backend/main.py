@@ -581,7 +581,11 @@ def _og_preview_html(request: Request, style_id: str, category: str, price_text:
     scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
     base = f"{scheme}://{host}"
-    page_url = f"{base}/search?style={style_id}"
+    # Echo back the exact query string the bot requested (not just
+    # ?style=) - a shared link's own cache-busting &v=N param needs to
+    # stay in og:url too, or the crawler's cache key for "this page" won't
+    # match the URL that was actually shared.
+    page_url = f"{base}/search?{request.url.query}" if request.url.query else f"{base}/search?style={style_id}"
     # w1200 came out ~600KB for these product photos - comfortably over
     # WhatsApp's (and most link-preview bots') informal size budget for a
     # preview thumbnail, which silently drops the image rather than erroring.
@@ -624,6 +628,7 @@ async def spa_catchall(request: Request, full_path: str):
             WITH {_ITEM_MASTER_CATEGORY_CTE},
             {_SKU_PRICE_AVG_CTE}
             SELECT b.style_id, imc.category, COALESCE(spa.avg_price, b.price) AS price,
+                   COALESCE(fit.b2b_category, clm.b2b_category) AS b2b_category,
                    (SELECT MIN(price) FROM b2b_catalog_sku_prices WHERE style_id = b.style_id) AS min_price,
                    (SELECT MAX(price) FROM b2b_catalog_sku_prices WHERE style_id = b.style_id) AS max_price,
                    (
@@ -635,6 +640,8 @@ async def spa_catchall(request: Request, full_path: str):
             FROM b2b_catalog b
             LEFT JOIN im_category imc ON imc.style_id = b.style_id
             LEFT JOIN sku_price_avg spa ON spa.style_id = b.style_id
+            LEFT JOIN category_length_map clm ON clm.category = imc.category
+            LEFT JOIN b2b_catalog_style_fit fit ON fit.style_id = b.style_id
             WHERE b.style_id = %s AND b.is_active = TRUE
             """,
             (style_id,),
@@ -651,7 +658,11 @@ async def spa_catchall(request: Request, full_path: str):
                 price_text = f"₹{row['price']:,.0f}"
             else:
                 price_text = "Price on request"
-            html = _og_preview_html(request, row["style_id"], row.get("category") or "", price_text, row.get("thumb_file_id"))
+            # B2B Category (the curated buyer-facing label), not the raw
+            # item_master Category - falls back to Category for styles that
+            # don't have a B2B Category set yet, same as the detail page.
+            display_category = row.get("b2b_category") or row.get("category") or ""
+            html = _og_preview_html(request, row["style_id"], display_category, price_text, row.get("thumb_file_id"))
             return HTMLResponse(content=html)
 
     # Public root files copied verbatim from frontend/public/ (favicon.svg

@@ -46,12 +46,28 @@ function priceText(data: StyleDetailType): string {
   return data.price != null ? `₹${data.price.toLocaleString('en-IN')}` : 'Price on request'
 }
 
+// Bumped whenever a change would alter what a link-preview bot (WhatsApp,
+// etc.) shows for a URL it's already fetched before - those bots cache a
+// preview per exact URL, so appending &v=<N> makes every subsequent share
+// count as a "new" URL to them and forces a fresh fetch instead of showing
+// a stale cached card. Only needs bumping again if a future change to the
+// preview content (image, price format, category, ...) needs the same fix.
+const SHARE_LINK_VERSION = 2
+
 function shareUrl(styleId: string): string {
-  return `${window.location.origin}/search?style=${encodeURIComponent(styleId)}`
+  return `${window.location.origin}/search?style=${encodeURIComponent(styleId)}&v=${SHARE_LINK_VERSION}`
+}
+
+// The buyer-facing label for a style's category on both the share text and
+// the detail page's own header - B2B Category (curated for this catalog,
+// e.g. "Kurti") when set, falling back to the raw item_master Category
+// (e.g. "Kurta-Jpr") for styles that don't have one yet.
+function displayCategory(data: StyleDetailType): string {
+  return data.fit.b2b_category || data.category
 }
 
 function shareText(data: StyleDetailType): string {
-  return `${data.style_id} — ${data.category} — ${priceText(data)}\n${shareUrl(data.style_id)}`
+  return `${data.style_id} — ${displayCategory(data)} — ${priceText(data)}\n${shareUrl(data.style_id)}`
 }
 
 export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClose: () => void }) {
@@ -536,7 +552,7 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[11px] tracking-widest uppercase text-[var(--color-gold-dark)] font-medium">
-                      {data.category}
+                      {displayCategory(data)}
                     </span>
                     {data.tier && (
                       <span className="text-[10px] font-semibold tracking-wide uppercase px-2 py-0.5 rounded-full bg-[var(--color-gold)] text-white">
