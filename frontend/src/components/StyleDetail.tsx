@@ -52,7 +52,7 @@ function priceText(data: StyleDetailType): string {
 // count as a "new" URL to them and forces a fresh fetch instead of showing
 // a stale cached card. Only needs bumping again if a future change to the
 // preview content (image, price format, category, ...) needs the same fix.
-const SHARE_LINK_VERSION = 2
+const SHARE_LINK_VERSION = 3
 
 function shareUrl(styleId: string): string {
   return `${window.location.origin}/search?style=${encodeURIComponent(styleId)}&v=${SHARE_LINK_VERSION}`
