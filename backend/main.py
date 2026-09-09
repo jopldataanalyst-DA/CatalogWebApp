@@ -572,7 +572,15 @@ _LINK_PREVIEW_BOT_RE = re.compile(
 
 
 def _og_preview_html(request: Request, style_id: str, category: str, price_text: str, image_id: Optional[str]) -> str:
-    base = str(request.base_url).rstrip("/")
+    # request.base_url reflects the scheme uvicorn itself saw, which is
+    # plain http - Dokploy's reverse proxy terminates HTTPS and forwards to
+    # this container over http. WhatsApp (and most link-preview bots) won't
+    # render an og:image served over http on an https page, which is
+    # exactly why the preview came back with no image - trust the
+    # X-Forwarded-Proto/Host headers the proxy actually sets instead.
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme)
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or request.url.netloc
+    base = f"{scheme}://{host}"
     page_url = f"{base}/search?style={style_id}"
     image_url = f"{base}/api/image-proxy?id={image_id}&sz=w1200" if image_id else f"{base}/hero-banner.jpg"
     title = f"{style_id} - Rajnandini Fashion"
