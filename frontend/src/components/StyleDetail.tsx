@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { X, ChevronLeft, ChevronRight, ImageOff, Loader2, Expand } from 'lucide-react'
+import { X, ChevronLeft, ChevronRight, ImageOff, Loader2, Expand, Share2 } from 'lucide-react'
 import { fetchStyle, imageUrl } from '../api'
 import type { SizePrice, StyleDetail as StyleDetailType } from '../types'
 
@@ -19,6 +19,41 @@ function groupSizesByPrice(sizePrices: SizePrice[]): { sizes: string[]; price: n
   return groups
 }
 
+// Lucide has no brand icons - a small inline WhatsApp glyph (colored via
+// currentColor, so it inherits WhatsApp's own paint) reads unmistakably as
+// "share to WhatsApp" the way a generic chat-bubble icon wouldn't, which
+// matters here since this catalog's actual buyers coordinate over WhatsApp.
+function WhatsAppIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="currentColor" aria-hidden="true">
+      <path d="M12.001 2C6.478 2 2 6.478 2 12c0 1.95.573 3.762 1.559 5.288L2.1 21.9l4.75-1.443A9.958 9.958 0 0 0 12.001 22C17.523 22 22 17.522 22 12S17.523 2 12.001 2zm0 18.166a8.126 8.126 0 0 1-4.407-1.29l-.316-.198-3.126.95.964-3.045-.207-.32A8.128 8.128 0 0 1 3.834 12c0-4.51 3.657-8.166 8.167-8.166 4.51 0 8.166 3.656 8.166 8.166 0 4.51-3.656 8.166-8.166 8.166z" />
+      <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-1.746-.873-2.888-1.559-4.036-3.537-.305-.527.305-.489.874-1.627.098-.198.05-.371-.05-.52-.099-.15-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.055 3.132 4.98 4.27 2.926 1.14 2.926.76 3.874.712.947-.05 3.083-1.26 3.512-2.478.428-1.213.428-2.256.298-2.478-.13-.222-.297-.222-.297-.222z" />
+    </svg>
+  )
+}
+
+// A style's price is either one flat number or a min-max range (see the
+// "Price"/"Price Range" dt/dd in the info panel below) - this mirrors that
+// exact logic so the shared text always matches what's on screen.
+function priceText(data: StyleDetailType): string {
+  if (data.size_prices.length > 0) {
+    const prices = data.size_prices.map(p => p.price).filter((p): p is number => p != null)
+    if (prices.length === 0) return 'Price on request'
+    const min = Math.min(...prices)
+    const max = Math.max(...prices)
+    return min === max ? `₹${min.toLocaleString('en-IN')}` : `₹${min.toLocaleString('en-IN')} – ₹${max.toLocaleString('en-IN')}`
+  }
+  return data.price != null ? `₹${data.price.toLocaleString('en-IN')}` : 'Price on request'
+}
+
+function shareUrl(styleId: string): string {
+  return `${window.location.origin}/search?style=${encodeURIComponent(styleId)}`
+}
+
+function shareText(data: StyleDetailType): string {
+  return `${data.style_id} — ${priceText(data)}\n${shareUrl(data.style_id)}`
+}
+
 export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClose: () => void }) {
   const [data, setData] = useState<StyleDetailType | null>(null)
   const [loading, setLoading] = useState(true)
@@ -35,6 +70,41 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
   const onCloseRef = useRef(onClose)
   useEffect(() => { lightboxOpenRef.current = lightboxOpen }, [lightboxOpen])
   useEffect(() => { onCloseRef.current = onClose })
+  const [copied, setCopied] = useState(false)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (copiedTimer.current) clearTimeout(copiedTimer.current) }, [])
+
+  // Native share sheet where available (Android/iOS/some desktop browsers -
+  // already lists WhatsApp, Gmail, etc. as options there), falling back to
+  // copy-to-clipboard with a brief inline confirmation everywhere else.
+  const onShare = async (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!data) return
+    const url = shareUrl(data.style_id)
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: data.style_id, text: `${data.style_id} — ${priceText(data)}`, url })
+      } catch {
+        // AbortError from the user dismissing the sheet - not a failure
+      }
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(shareText(data))
+      setCopied(true)
+      if (copiedTimer.current) clearTimeout(copiedTimer.current)
+      copiedTimer.current = setTimeout(() => setCopied(false), 1800)
+    } catch {
+      // Clipboard access denied (e.g. insecure context) - nothing more we
+      // can do without a permissions prompt of our own.
+    }
+  }
+
+  const onShareWhatsApp = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!data) return
+    window.open(`https://wa.me/?text=${encodeURIComponent(shareText(data))}`, '_blank', 'noopener')
+  }
 
   // Makes the phone/browser back button close this modal one layer at a
   // time (lightbox first, then the modal itself) instead of leaving the
@@ -376,14 +446,32 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
                   </div>
                 ))}
               </div>
-              <button
-                onClick={e => { e.stopPropagation(); setLightboxOpen(true) }}
-                className="absolute top-2 right-2 bg-black/10 hover:bg-black/20 text-white rounded-full p-1.5"
-                aria-label="View full screen"
-                title="View full screen"
-              >
-                <Expand size={14} />
-              </button>
+              <div className="absolute top-2 right-2 flex items-center gap-1.5">
+                <button
+                  onClick={onShareWhatsApp}
+                  className="bg-black/10 hover:bg-black/20 text-white rounded-full p-1.5"
+                  aria-label="Share on WhatsApp"
+                  title="Share on WhatsApp"
+                >
+                  <WhatsAppIcon size={14} />
+                </button>
+                <button
+                  onClick={onShare}
+                  className="bg-black/10 hover:bg-black/20 text-white rounded-full p-1.5"
+                  aria-label="Share"
+                  title="Share"
+                >
+                  <Share2 size={14} />
+                </button>
+                <button
+                  onClick={e => { e.stopPropagation(); setLightboxOpen(true) }}
+                  className="bg-black/10 hover:bg-black/20 text-white rounded-full p-1.5"
+                  aria-label="View full screen"
+                  title="View full screen"
+                >
+                  <Expand size={14} />
+                </button>
+              </div>
               {images.length > 1 && (
                 <>
                   <button
@@ -430,6 +518,12 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
             <X size={20} />
           </button>
 
+          {copied && (
+            <div className="absolute top-14 right-4 bg-[var(--color-ink)] text-[var(--color-paper)] text-xs px-3 py-1.5 rounded-full shadow-lg z-10">
+              Link copied
+            </div>
+          )}
+
           {loading || !data ? (
             <div className="animate-pulse space-y-4 pt-2">
               <div className="h-6 w-40 bg-[var(--color-paper2)] rounded" />
@@ -439,15 +533,35 @@ export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClos
           ) : (
             <div className="space-y-6 pt-2">
               <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-[11px] tracking-widest uppercase text-[var(--color-gold-dark)] font-medium">
-                    {data.category}
-                  </span>
-                  {data.tier && (
-                    <span className="text-[10px] font-semibold tracking-wide uppercase px-2 py-0.5 rounded-full bg-[var(--color-gold)] text-white">
-                      {data.tier}
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] tracking-widest uppercase text-[var(--color-gold-dark)] font-medium">
+                      {data.category}
                     </span>
-                  )}
+                    {data.tier && (
+                      <span className="text-[10px] font-semibold tracking-wide uppercase px-2 py-0.5 rounded-full bg-[var(--color-gold)] text-white">
+                        {data.tier}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0 mr-8">
+                    <button
+                      onClick={onShareWhatsApp}
+                      className="text-[var(--color-ink)]/50 hover:text-[var(--color-ink)] rounded-full p-1.5 hover:bg-[var(--color-paper2)]"
+                      aria-label="Share on WhatsApp"
+                      title="Share on WhatsApp"
+                    >
+                      <WhatsAppIcon size={16} />
+                    </button>
+                    <button
+                      onClick={onShare}
+                      className="text-[var(--color-ink)]/50 hover:text-[var(--color-ink)] rounded-full p-1.5 hover:bg-[var(--color-paper2)]"
+                      aria-label="Share"
+                      title="Share"
+                    >
+                      <Share2 size={16} />
+                    </button>
+                  </div>
                 </div>
                 <h2 className="font-[var(--font-display)] text-2xl sm:text-3xl mt-1" style={{ fontFamily: 'var(--font-display)' }}>
                   {data.style_id}
