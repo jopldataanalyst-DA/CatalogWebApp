@@ -571,19 +571,12 @@ _LINK_PREVIEW_BOT_RE = re.compile(
 )
 
 
-def _og_preview_html(
-    request: Request, style_id: str, category: str, b2b_category: Optional[str], price_text: str, image_id: Optional[str]
-) -> str:
+def _og_preview_html(request: Request, style_id: str, category: str, price_text: str, image_id: Optional[str]) -> str:
     base = str(request.base_url).rstrip("/")
     page_url = f"{base}/search?style={style_id}"
     image_url = f"{base}/api/image-proxy?id={image_id}&sz=w1200" if image_id else f"{base}/hero-banner.jpg"
     title = f"{style_id} - Rajnandini Fashion"
-    # b2b_category is often the same word as category (e.g. both "Cord
-    # Set"), but sometimes a per-style override gives it a more specific
-    # buyer-facing label (see b2b_catalog_style_fit) - only worth the extra
-    # segment in the description when it actually differs.
-    category_part = category if not b2b_category or b2b_category == category else f"{category} ({b2b_category})"
-    description = f"{category_part} · {price_text}"
+    description = f"{category} · {price_text}"
 
     def esc(s: str) -> str:
         return s.replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;")
@@ -619,7 +612,6 @@ async def spa_catchall(request: Request, full_path: str):
             WITH {_ITEM_MASTER_CATEGORY_CTE},
             {_SKU_PRICE_AVG_CTE}
             SELECT b.style_id, imc.category, COALESCE(spa.avg_price, b.price) AS price,
-                   COALESCE(fit.b2b_category, clm.b2b_category) AS b2b_category,
                    (
                        SELECT ic.drive_file_id FROM b2b_catalog_images bci
                        JOIN image_collection ic ON ic.id = bci.image_id
@@ -629,17 +621,13 @@ async def spa_catchall(request: Request, full_path: str):
             FROM b2b_catalog b
             LEFT JOIN im_category imc ON imc.style_id = b.style_id
             LEFT JOIN sku_price_avg spa ON spa.style_id = b.style_id
-            LEFT JOIN category_length_map clm ON clm.category = imc.category
-            LEFT JOIN b2b_catalog_style_fit fit ON fit.style_id = b.style_id
             WHERE b.style_id = %s AND b.is_active = TRUE
             """,
             (style_id,),
         )
         if row:
             price_text = f"₹{row['price']:,.0f}" if row.get("price") is not None else "Price on request"
-            html = _og_preview_html(
-                request, row["style_id"], row.get("category") or "", row.get("b2b_category"), price_text, row.get("thumb_file_id")
-            )
+            html = _og_preview_html(request, row["style_id"], row.get("category") or "", price_text, row.get("thumb_file_id"))
             return HTMLResponse(content=html)
 
     # Public root files copied verbatim from frontend/public/ (favicon.svg

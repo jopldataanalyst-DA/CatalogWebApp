@@ -51,15 +51,7 @@ function shareUrl(styleId: string): string {
 }
 
 function shareText(data: StyleDetailType): string {
-  // Only add the B2B Category when it actually says something the plain
-  // Category didn't already (they're often the same word) - matches the
-  // same "only if it differs" rule the backend's link-preview description
-  // uses, so the pre-filled message and the WhatsApp preview card agree.
-  const category =
-    data.fit.b2b_category && data.fit.b2b_category !== data.category
-      ? `${data.category} (${data.fit.b2b_category})`
-      : data.category
-  return `${data.style_id} — ${category} — ${priceText(data)}\n${shareUrl(data.style_id)}`
+  return `${data.style_id} — ${data.category} — ${priceText(data)}\n${shareUrl(data.style_id)}`
 }
 
 export function StyleDetailModal({ styleId, onClose }: { styleId: string; onClose: () => void }) {
