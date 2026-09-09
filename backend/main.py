@@ -624,6 +624,8 @@ async def spa_catchall(request: Request, full_path: str):
             WITH {_ITEM_MASTER_CATEGORY_CTE},
             {_SKU_PRICE_AVG_CTE}
             SELECT b.style_id, imc.category, COALESCE(spa.avg_price, b.price) AS price,
+                   (SELECT MIN(price) FROM b2b_catalog_sku_prices WHERE style_id = b.style_id) AS min_price,
+                   (SELECT MAX(price) FROM b2b_catalog_sku_prices WHERE style_id = b.style_id) AS max_price,
                    (
                        SELECT ic.drive_file_id FROM b2b_catalog_images bci
                        JOIN image_collection ic ON ic.id = bci.image_id
@@ -638,7 +640,17 @@ async def spa_catchall(request: Request, full_path: str):
             (style_id,),
         )
         if row:
-            price_text = f"₹{row['price']:,.0f}" if row.get("price") is not None else "Price on request"
+            # Same "range when sizes are actually priced differently, else
+            # one flat number" rule the product detail page itself uses -
+            # a per-style average would hide that "S is 450, XL is 550"
+            # actually matters to a wholesale buyer deciding to open the link.
+            min_price, max_price = row.get("min_price"), row.get("max_price")
+            if min_price is not None and max_price is not None and min_price != max_price:
+                price_text = f"₹{min_price:,.0f} – ₹{max_price:,.0f}"
+            elif row.get("price") is not None:
+                price_text = f"₹{row['price']:,.0f}"
+            else:
+                price_text = "Price on request"
             html = _og_preview_html(request, row["style_id"], row.get("category") or "", price_text, row.get("thumb_file_id"))
             return HTMLResponse(content=html)
 
